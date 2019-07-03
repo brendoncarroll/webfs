@@ -1,7 +1,6 @@
 package webfscmd
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -15,7 +14,9 @@ var lsCmd = &cobra.Command{
 	Use:   "ls",
 	Short: "ls",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
+		if err := setupWfs(); err != nil {
+			return err
+		}
 
 		p := "/"
 		if len(args) > 0 {

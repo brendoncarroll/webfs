@@ -1,4 +1,4 @@
-package l1
+package webref
 
 import (
 	"bytes"
@@ -11,32 +11,27 @@ import (
 
 	// golang.org/x/crypto/internal/chacha20 is internal
 	"github.com/Yawning/chacha20"
-
-	"github.com/brendoncarroll/webfs/pkg/l0"
+	"github.com/brendoncarroll/webfs/pkg/stores"
 )
 
-type Options struct {
+type CryptoOptions struct {
 	SecretSeed []byte
 	EncAlgo    string
 }
 
-func DefaultOptions() Options {
-	return Options{
+func DefaultCryptoOptions() CryptoOptions {
+	return CryptoOptions{
 		EncAlgo: "chacha20",
 	}
 }
 
-type Derefer interface {
-	Deref(ctx context.Context, s l0.Read) ([]byte, error)
-}
-
-type Ref struct {
+type CryptoRef struct {
 	URL     string `json:"url"`
 	EncAlgo string `json:"enc-algo"`
 	Secret  []byte `json:"secret"`
 }
 
-func Post(ctx context.Context, s l0.WriteOnce, prefix string, data []byte, o Options) (*Ref, error) {
+func PostCrypto(ctx context.Context, s stores.WriteOnce, prefix string, data []byte, o CryptoOptions) (*CryptoRef, error) {
 	secret := generateSecret(data, o.SecretSeed)
 
 	ctext := make([]byte, len(data))
@@ -48,14 +43,14 @@ func Post(ctx context.Context, s l0.WriteOnce, prefix string, data []byte, o Opt
 	if err != nil {
 		return nil, err
 	}
-	return &Ref{
+	return &CryptoRef{
 		EncAlgo: o.EncAlgo,
 		Secret:  secret,
 		URL:     string(key),
 	}, nil
 }
 
-func (r *Ref) Deref(ctx context.Context, store l0.Read) ([]byte, error) {
+func (r *CryptoRef) Deref(ctx context.Context, store stores.Read) ([]byte, error) {
 	payload, err := store.Get(ctx, r.URL)
 	if err != nil {
 		return nil, err

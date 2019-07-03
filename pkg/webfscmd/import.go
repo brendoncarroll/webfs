@@ -15,6 +15,9 @@ func init() {
 var importCmd = &cobra.Command{
 	Use: "import",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := setupWfs(); err != nil {
+			return err
+		}
 		if len(args) < 2 {
 			return errors.New("path and dest required")
 		}

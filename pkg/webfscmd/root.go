@@ -15,18 +15,21 @@ var (
 var rootCmd = &cobra.Command{
 	Short: "webfs",
 	Use:   "webfs",
-	PersistentPreRunE: func(cmd *cobra.Command, args []string) (err error) {
-		const superblockPath = "./superblock1.json"
-		sb := webfs.NewSuperblock(superblockPath)
-		wfs, err = webfs.New(sb)
-		if err != nil {
-			return err
-		}
-		ctx = context.Background()
-		return nil
-	},
 }
 
 func Execute() error {
 	return rootCmd.Execute()
+}
+
+func setupWfs() error {
+	sb, err := webfs.SuperblockFromPath(superblockPath)
+	if err != nil {
+		return err
+	}
+	wfs, err = webfs.New(sb)
+	if err != nil {
+		return err
+	}
+	ctx = context.Background()
+	return nil
 }

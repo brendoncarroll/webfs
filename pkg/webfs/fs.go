@@ -12,23 +12,22 @@ import (
 )
 
 type Options struct {
-	Replicas map[string]int
+	SecretSeed []byte
+	Replicas   map[string]int
 }
 
 type WebFS struct {
 	sb    *Superblock
 	store *Store
 
-	mu    sync.Mutex
-	cells map[string]Cell
-	//mounts map[string]CellMount
+	cells sync.Map
 }
 
 func New(sb *Superblock) (*WebFS, error) {
 	wfs := &WebFS{
 		sb:    sb,
 		store: NewStore(),
-		cells: map[string]Cell{},
+		cells: sync.Map{},
 	}
 
 	rootCell := &RootCell{superblock: sb}
@@ -256,22 +255,18 @@ func (wfs *WebFS) Mkdir(ctx context.Context, p string) error {
 }
 
 func (wfs *WebFS) addCell(cell Cell) {
-	wfs.mu.Lock()
-	defer wfs.mu.Unlock()
-
-	if _, exist := wfs.cells[cell.ID()]; !exist {
-		wfs.cells[cell.ID()] = cell
+	_, loaded := wfs.cells.LoadOrStore(cell.ID(), cell)
+	if loaded {
+		log.Println("loaded cell", cell)
 	}
 }
 
 func (wfs *WebFS) getCell(id string) Cell {
-	wfs.mu.Lock()
-	defer wfs.mu.Unlock()
-	cell, exists := wfs.cells[id]
-	if !exists {
+	cell, _ := wfs.cells.Load(id)
+	if cell == nil {
 		return nil
 	}
-	return cell
+	return cell.(Cell)
 }
 
 func objectFromCell(ctx context.Context, cell Cell) (*Object, error) {

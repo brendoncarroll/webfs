@@ -15,6 +15,9 @@ func init() {
 var catCmd = &cobra.Command{
 	Use: "cat",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := setupWfs(); err != nil {
+			return err
+		}
 		if len(args) < 0 {
 			return errors.New("missing path")
 		}

@@ -107,20 +107,3 @@ func (rc *RootCell) CAS(ctx context.Context, cur []byte, next []byte) (bool, err
 	rc.data = next
 	return true, nil
 }
-
-// type UnionNamespace struct {
-// 	Layers []Object
-// }
-
-// func (ns *UnionNamespace) Get(ctx context.Context, k []byte) ([]byte, error) {
-// 	for _, ns2 := range ns.Layers {
-// 		v, err := ns2.Get(ctx, k)
-// 		if err != nil {
-// 			return nil, err
-// 		}
-// 		if v != nil {
-// 			return v, nil
-// 		}
-// 	}
-// 	return nil, nil
-// }

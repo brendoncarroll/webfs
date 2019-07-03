@@ -1,29 +1,24 @@
-package l2
+package webref
 
 import (
 	"context"
 	"errors"
 
-	"github.com/brendoncarroll/webfs/pkg/l0"
-	"github.com/brendoncarroll/webfs/pkg/l1"
+	"github.com/brendoncarroll/webfs/pkg/stores"
 )
 
-type Options struct {
-	Replicas map[string]int
+type RepPackRef struct {
+	Single *CryptoRef `json:"single"`
+	Mirror *Mirror    `json:"mirror"`
 }
 
-type Ref struct {
-	Single *l1.Ref `json:"single"`
-	Mirror *Mirror `json:"mirror"`
-}
-
-func Post(ctx context.Context, store l0.WriteOnce, data []byte, o Options) (*Ref, error) {
+func PostRepPack(ctx context.Context, store stores.WriteOnce, data []byte, o Options) (*RepPackRef, error) {
 	refs := []Ref{}
 	for k, v := range o.Replicas {
 		for i := 0; i < v; i++ {
 			prefix := k
-			l1opts := l1.DefaultOptions()
-			l1ref, err := l1.Post(ctx, store, prefix, data, l1opts)
+			cryptoOpts := DefaultCryptoOptions()
+			l1ref, err := PostCrypto(ctx, store, prefix, data, cryptoOpts)
 			if err != nil {
 				return nil, err
 			}
@@ -42,7 +37,7 @@ func Post(ctx context.Context, store l0.WriteOnce, data []byte, o Options) (*Ref
 	return &ref, nil
 }
 
-func (r *Ref) Deref(ctx context.Context, s l0.Read) ([]byte, error) {
+func (r *RepPackRef) Deref(ctx context.Context, s stores.Read) ([]byte, error) {
 	switch {
 	case r.Single != nil:
 		return r.Single.Deref(ctx, s)
@@ -54,7 +49,7 @@ func (r *Ref) Deref(ctx context.Context, s l0.Read) ([]byte, error) {
 }
 
 type Mirror struct {
-	Replicas []l1.Ref `json:"replicas"`
+	Replicas []CryptoRef `json:"replicas"`
 }
 
 // func MirrorRef(ctx context.Context, s l1.WriteOnce, data []byte) (*MirrorRef, error) {
@@ -68,7 +63,7 @@ type Mirror struct {
 // 	}
 // }
 
-func (m *Mirror) Deref(ctx context.Context, s l0.Read) ([]byte, error) {
+func (m *Mirror) Deref(ctx context.Context, s stores.Read) ([]byte, error) {
 	// 	l := len(m.Replicas)
 	// 	count := 0
 	// 	i := rand.Int() % l

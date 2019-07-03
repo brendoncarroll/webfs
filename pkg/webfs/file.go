@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/json"
+	"errors"
 	"io"
-	"log"
 
 	"github.com/brendoncarroll/webfs/pkg/merkleds"
+	"github.com/brendoncarroll/webfs/pkg/webref"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -64,34 +64,84 @@ func NewFile(ctx context.Context, s ReadWriteOnce, r io.Reader) (*File, error) {
 	return f, nil
 }
 
-func (f *File) Reader(store Read) io.ReadCloser {
-	d, _ := json.Marshal(f.Tree.Entries)
-	log.Println(string(d))
-	return &FileReader{
-		tree:  f.Tree,
+func (f *File) Reader(store webref.Read) io.ReadCloser {
+	return newFileHandle(store, f)
+}
+
+func newFileHandle(store webref.Read, f *File) *FileHandle {
+	return &FileHandle{
+		file:  f,
 		store: store,
-		ref:   f.Tree.Entries[0].Ref,
 	}
 }
 
-type FileReader struct {
+type FileHandle struct {
+	store  webref.Read
 	offset uint64
-	buf    bytes.Buffer
-	ref    Ref
-	store  Read
-	tree   *merkleds.Tree
+	file   *File
+
+	ti *merkleds.TreeIter
 }
 
-func (fr *FileReader) Read(p []byte) (n int, err error) {
-	ctx := context.TODO()
-	data, err := fr.store.Get(ctx, fr.ref)
-	if err != nil {
-		return 0, err
+func (fh *FileHandle) Seek(offset int64, whence int) (ret int64, err error) {
+	switch whence {
+	case 0:
+		fh.offset = uint64(offset)
+	case 1:
+		fh.offset = uint64(int64(fh.offset) + offset)
+	case 2:
+		o := int64(fh.file.Size) - offset
+		if o < 0 {
+			return 0, errors.New("negative offset")
+		}
+		fh.offset = uint64(o)
+	default:
+		panic("invalid value for whence")
 	}
-	n = copy(p, data)
+	return int64(fh.offset), nil
+}
+
+func (fh *FileHandle) Read(p []byte) (n int, err error) {
+	ctx := context.TODO()
+
+	for n < len(p) {
+		ent, err := fh.file.Tree.MaxLteq(ctx, fh.store, offset2Key(fh.offset))
+		if err != nil {
+			return 0, err
+		}
+
+		if ent == nil {
+			break // done, no entry for this offset, empty file
+		}
+		o := key2Offset(ent.Key)
+		if fh.offset < o {
+			return 0, errors.New("got wrong entry from tree")
+		}
+		relo := fh.offset - o
+		data, err := fh.store.Get(ctx, ent.Ref)
+		if err != nil {
+			return n, err
+		}
+		if int(relo) >= len(data) {
+			break // there is no more data, we must have read it all
+		}
+		n2 := copy(p, data[relo:])
+		n += n2
+		fh.offset += uint64(n2)
+	}
 	return n, io.EOF
 }
 
-func (fr *FileReader) Close() error {
+func (fr *FileHandle) Close() error {
 	return nil
+}
+
+func offset2Key(x uint64) []byte {
+	y := [8]byte{}
+	binary.BigEndian.PutUint64(y[:], x)
+	return y[:]
+}
+
+func key2Offset(x []byte) uint64 {
+	return binary.BigEndian.Uint64(x)
 }

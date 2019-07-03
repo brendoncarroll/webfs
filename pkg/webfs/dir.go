@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/brendoncarroll/webfs/pkg/l2"
 	"github.com/brendoncarroll/webfs/pkg/merkleds"
+	"github.com/brendoncarroll/webfs/pkg/webref"
 )
 
 type Object struct {
@@ -93,9 +93,12 @@ func (d *Dir) Put(ctx context.Context, store ReadWriteOnce, ent DirEntry) (*Dir,
 	return &Dir{Tree: tree}, nil
 }
 
-func (d *Dir) Entries(ctx context.Context, store l2.Read) ([]DirEntry, error) {
+func (d *Dir) Entries(ctx context.Context, store webref.Read) ([]DirEntry, error) {
 	entries := []DirEntry{}
-	iter := d.Tree.Iterate(store)
+	iter, err := d.Tree.Iterate(ctx, store, nil)
+	if err != nil {
+		return nil, err
+	}
 
 	for {
 		ent, err := iter.Next(ctx)

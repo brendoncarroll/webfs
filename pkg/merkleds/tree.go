@@ -6,13 +6,13 @@ import (
 	"encoding/json"
 	"sort"
 
-	"github.com/brendoncarroll/webfs/pkg/l2"
+	"github.com/brendoncarroll/webfs/pkg/webref"
 )
 
-type Ref = l2.Ref
-type WriteOnce = l2.WriteOnce
-type Read = l2.Read
-type ReadWriteOnce = l2.ReadWriteOnce
+type Ref = webref.Ref
+type WriteOnce = webref.WriteOnce
+type Read = webref.Read
+type ReadWriteOnce = webref.ReadWriteOnce
 
 // a guess. a tree needs to be able to store at least 2 entries.
 const minTreeSize = 1024
@@ -105,7 +105,7 @@ func (t *Tree) indexOf(key []byte) int {
 }
 
 // MaxLteq finds the max entry below key.
-func (t *Tree) MaxLteq(ctx context.Context, s l2.Read, key []byte) (*TreeEntry, error) {
+func (t *Tree) MaxLteq(ctx context.Context, s webref.Read, key []byte) (*TreeEntry, error) {
 	i := t.indexOf(key)
 	if i >= len(t.Entries) {
 		return nil, nil
@@ -217,12 +217,23 @@ func (t *Tree) getSubtree(ctx context.Context, s Read, i int) (*Tree, error) {
 	return &subtree, nil
 }
 
-func (t *Tree) Iterate(store Read) *TreeIter {
-	return &TreeIter{
-		tree:  t,
-		store: store,
+func (t *Tree) Iterate(ctx context.Context, store Read, startKey []byte) (*TreeIter, error) {
+	var lastKey []byte
+	if len(startKey) > 0 {
+		ent, err := t.MaxLteq(ctx, store, startKey)
+		if err != nil {
+			return nil, err
+		}
+		if ent != nil && bytes.Compare(ent.Key, startKey) != 0 {
+			lastKey = ent.Key
+		}
 	}
-	return nil
+
+	return &TreeIter{
+		tree:    t,
+		store:   store,
+		lastKey: lastKey,
+	}, nil
 }
 
 type TreeIter struct {

@@ -13,16 +13,15 @@ type RepPackRef struct {
 }
 
 func PostRepPack(ctx context.Context, store stores.WriteOnce, data []byte, o Options) (*RepPackRef, error) {
-	refs := []Ref{}
+	refs := []RepPackRef{}
 	for k, v := range o.Replicas {
 		for i := 0; i < v; i++ {
 			prefix := k
-			cryptoOpts := DefaultCryptoOptions()
-			l1ref, err := PostCrypto(ctx, store, prefix, data, cryptoOpts)
+			l1ref, err := PostCrypto(ctx, store, prefix, data, o)
 			if err != nil {
 				return nil, err
 			}
-			ref := Ref{
+			ref := RepPackRef{
 				Single: l1ref,
 			}
 			refs = append(refs, ref)
@@ -49,7 +48,7 @@ func (r *RepPackRef) Deref(ctx context.Context, s stores.Read) ([]byte, error) {
 }
 
 type Mirror struct {
-	Replicas []CryptoRef `json:"replicas"`
+	Replicas []RepPackRef `json:"replicas"`
 }
 
 // func MirrorRef(ctx context.Context, s l1.WriteOnce, data []byte) (*MirrorRef, error) {

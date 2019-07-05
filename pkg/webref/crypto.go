@@ -14,24 +14,14 @@ import (
 	"github.com/brendoncarroll/webfs/pkg/stores"
 )
 
-type CryptoOptions struct {
-	SecretSeed []byte
-	EncAlgo    string
-}
-
-func DefaultCryptoOptions() CryptoOptions {
-	return CryptoOptions{
-		EncAlgo: "chacha20",
-	}
-}
-
 type CryptoRef struct {
 	URL     string `json:"url"`
 	EncAlgo string `json:"enc-algo"`
 	Secret  []byte `json:"secret"`
+	Length  uint64 `json:"length"`
 }
 
-func PostCrypto(ctx context.Context, s stores.WriteOnce, prefix string, data []byte, o CryptoOptions) (*CryptoRef, error) {
+func PostCrypto(ctx context.Context, s stores.WriteOnce, prefix string, data []byte, o Options) (*CryptoRef, error) {
 	secret := generateSecret(data, o.SecretSeed)
 
 	ctext := make([]byte, len(data))
@@ -47,6 +37,7 @@ func PostCrypto(ctx context.Context, s stores.WriteOnce, prefix string, data []b
 		EncAlgo: o.EncAlgo,
 		Secret:  secret,
 		URL:     string(key),
+		Length:  uint64(len(data)),
 	}, nil
 }
 
@@ -59,7 +50,7 @@ func (r *CryptoRef) Deref(ctx context.Context, store stores.Read) ([]byte, error
 		return nil, err
 	}
 
-	return payload, nil
+	return payload[:r.Length], nil
 }
 
 func crypt(algo string, secret, in, out []byte) error {

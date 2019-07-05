@@ -1,6 +1,8 @@
 package webref
 
-import "context"
+import (
+	"context"
+)
 
 type Read interface {
 	Get(context.Context, Ref) ([]byte, error)

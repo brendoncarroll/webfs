@@ -21,11 +21,8 @@ func Execute() error {
 	return rootCmd.Execute()
 }
 
-func setupWfs() error {
-	sb, err := webfs.SuperblockFromPath(superblockPath)
-	if err != nil {
-		return err
-	}
+func setupWfs() (err error) {
+	sb := webfs.SuperblockFromPath(superblockPath)
 	wfs, err = webfs.New(sb)
 	if err != nil {
 		return err

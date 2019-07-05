@@ -2,35 +2,31 @@ package webfs
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"log"
 	"path"
 	"strings"
 	"sync"
+
+	"github.com/brendoncarroll/webfs/pkg/cells"
+	"github.com/brendoncarroll/webfs/pkg/webref"
 )
 
-type Options struct {
-	SecretSeed []byte
-	Replicas   map[string]int
-}
+type Options = webref.Options
 
 type WebFS struct {
-	sb    *Superblock
-	store *Store
-
-	cells sync.Map
+	muxStore *webref.MuxStore
+	cells    sync.Map
 }
 
-func New(sb *Superblock) (*WebFS, error) {
+func New(rootCell Cell) (*WebFS, error) {
 	wfs := &WebFS{
-		sb:    sb,
-		store: NewStore(),
-		cells: sync.Map{},
+		muxStore: webref.NewMuxStore(),
+		cells:    sync.Map{},
 	}
 
-	rootCell := &RootCell{superblock: sb}
+	wfs.cells.Store("", rootCell)
 	wfs.addCell(rootCell)
 
 	return wfs, wfs.init()
@@ -48,8 +44,16 @@ func (wfs *WebFS) init() error {
 		o := Object{
 			Dir: NewDir(),
 		}
-		objData := o.Marshal()
-		accepted, err := rootCell.(CASCell).CAS(ctx, nil, objData)
+		opts := webref.DefaultOptions()
+		ref, err := wfs.storeObject(ctx, o, opts)
+		if err != nil {
+			return err
+		}
+		cc := CellContents{
+			Options:   opts,
+			ObjectRef: *ref,
+		}
+		accepted, err := rootCell.(CASCell).CAS(ctx, nil, cc.Marshal())
 		if err != nil {
 			return err
 		}
@@ -64,6 +68,7 @@ type LookupResult struct {
 	Cell    Cell
 	RelPath string
 	Object  Object
+	Options Options
 }
 
 func (wfs *WebFS) Lookup(ctx context.Context, p string) (*LookupResult, error) {
@@ -78,50 +83,55 @@ func (wfs *WebFS) Lookup(ctx context.Context, p string) (*LookupResult, error) {
 	return res, err
 }
 
-func (wfs *WebFS) lookup(ctx context.Context, cells []Cell, relpath string, o *Object, p string) (*LookupResult, error) {
-	if len(cells) > 1000 {
+func (wfs *WebFS) lookup(ctx context.Context, cellStack []Cell, relpath string, o *Object, p string) (*LookupResult, error) {
+	if len(cellStack) > 1000 {
 		return nil, errors.New("1000 cells deep is a little much")
 	}
 
-	// If we don't have an object then do a load from the last cell in the stack
-	if o == nil {
-		// let this panic, there should always be a root cell
-		cell := cells[len(cells)-1]
-		o, err := objectFromCell(ctx, cell)
-		if err != nil {
-			return nil, err
-		}
-		return wfs.lookup(ctx, cells, relpath, o, p)
+	// let this panic, there should always be a root cell
+	cell := cellStack[len(cellStack)-1]
+	cc, err := GetContents(ctx, cell)
+	if err != nil {
+		return nil, err
+	}
+	store := &Store{ms: wfs.muxStore, opts: cc.Options}
+
+	o, err = wfs.loadObject(ctx, cc.ObjectRef)
+	if err != nil {
+		return nil, err
 	}
 
 	// if we have an empty path then we have finished the lookup
 	if p == "" {
-		cell := cells[len(cells)-1]
+		cell := cellStack[len(cellStack)-1]
 		res := LookupResult{
 			Cell:    cell,
 			RelPath: relpath,
 			Object:  *o,
+			Options: cc.Options,
 		}
 		return &res, nil
+	}
+
+	// if we don't have an object then do a load from the last cell in the stack
+	if o == nil {
+		return wfs.lookup(ctx, cellStack, relpath, o, p)
 	}
 
 	switch {
 	// load the cell
 	case o.Cell != nil:
-		cell := wfs.getCell(o.Cell.ID())
-		if cell == nil {
-			cell = NewCell(*o.Cell)
-			wfs.addCell(cell)
-		}
-		cells = append(cells, cell)
-		return wfs.lookup(ctx, cells, "", nil, p)
+		cell = cells.Make(*o.Cell)
+		wfs.addCell(cell)
+		cellStack = append(cellStack, cell)
+		return wfs.lookup(ctx, cellStack, "", nil, p)
 	// resolve the path
 	case o.Dir != nil:
 		parts := strings.Split(p, "/")
 		if len(parts) < 2 {
 			parts = append(parts, "")
 		}
-		o2, err := o.Dir.Get(ctx, wfs.store, parts[0])
+		o2, err := o.Dir.Get(ctx, store, parts[0])
 		if o2 == nil {
 			return nil, errors.New("no entry for " + p)
 		}
@@ -129,7 +139,7 @@ func (wfs *WebFS) lookup(ctx context.Context, cells []Cell, relpath string, o *O
 			return nil, err
 		}
 		relpath := path.Join(relpath, parts[0])
-		return wfs.lookup(ctx, cells, relpath, o2, parts[1])
+		return wfs.lookup(ctx, cellStack, relpath, o2, parts[1])
 	// errors below
 	case o.File != nil:
 		return nil, errors.New("cannot lookup path in file")
@@ -147,7 +157,8 @@ func (wfs *WebFS) Ls(ctx context.Context, p string) ([]DirEntry, error) {
 	if o.Dir == nil {
 		return nil, errors.New("Cannot ls non dir")
 	}
-	entries, err := o.Dir.Entries(ctx, wfs.store)
+	store := &Store{ms: wfs.muxStore, opts: res.Options}
+	entries, err := o.Dir.Entries(ctx, store)
 	if err != nil {
 		return nil, err
 	}
@@ -155,12 +166,6 @@ func (wfs *WebFS) Ls(ctx context.Context, p string) ([]DirEntry, error) {
 }
 
 func (wfs *WebFS) ImportFile(ctx context.Context, r io.Reader, dst string) error {
-	f, err := NewFile(ctx, wfs.store, r)
-	if err != nil {
-		return err
-	}
-	fo := Object{File: f}
-
 	parts := strings.Split(dst, "/")
 	if len(parts) < 2 {
 		parts = []string{"", parts[0]}
@@ -171,15 +176,45 @@ func (wfs *WebFS) ImportFile(ctx context.Context, r io.Reader, dst string) error
 	}
 	// path from the cell
 	relPath := path.Join(res.RelPath, parts[1])
-	return Apply(ctx, res.Cell, func(cur Object) (*Object, error) {
-		return wfs.PutObject(ctx, cur, fo, relPath)
+
+	cc, err := GetContents(ctx, res.Cell)
+	if err != nil {
+		return err
+	}
+	store := &Store{ms: wfs.muxStore, opts: cc.Options}
+	f, err := NewFile(ctx, store, r)
+	if err != nil {
+		return err
+	}
+	fo := Object{File: f}
+
+	return Apply(ctx, res.Cell, func(cur CellContents) (*CellContents, error) {
+		curO, err := wfs.loadObject(ctx, cur.ObjectRef)
+		if err != nil {
+			return nil, err
+		}
+
+		o, err := wfs.PutObject(ctx, *curO, fo, relPath, cur.Options)
+		if err != nil {
+			return nil, err
+		}
+
+		oRef, err := wfs.storeObject(ctx, *o, cc.Options)
+		if err != nil {
+			return nil, err
+		}
+		return &CellContents{
+			Options:   cur.Options,
+			ObjectRef: *oRef,
+		}, nil
 	})
 }
 
 // PutObject - maybe ReplaceInParent is a better name
 // you will get back an updated version of parent, with target inserted at relPath
 // under the parent
-func (wfs *WebFS) PutObject(ctx context.Context, parent, target Object, relPath string) (*Object, error) {
+func (wfs *WebFS) PutObject(ctx context.Context, parent, target Object, relPath string, opts Options) (*Object, error) {
+	store := &Store{ms: wfs.muxStore, opts: opts}
 	log.Println("PutObject", relPath)
 	switch {
 	case parent.Cell != nil:
@@ -198,14 +233,14 @@ func (wfs *WebFS) PutObject(ctx context.Context, parent, target Object, relPath 
 		var newChild *Object
 		// need to recurse
 		if len(parts) == 2 {
-			child, err := parent.Dir.Get(ctx, wfs.store, parts[0])
+			child, err := parent.Dir.Get(ctx, store, parts[0])
 			if err != nil {
 				return nil, err
 			}
 			if child == nil {
 				return nil, errors.New("no such path")
 			}
-			child, err = wfs.PutObject(ctx, *child, target, parts[1])
+			child, err = wfs.PutObject(ctx, *child, target, parts[1], opts)
 			if err != nil {
 				return nil, err
 			}
@@ -219,7 +254,7 @@ func (wfs *WebFS) PutObject(ctx context.Context, parent, target Object, relPath 
 			Name:   parts[0],
 			Object: *newChild,
 		}
-		do, err := parent.Dir.Put(ctx, wfs.store, dirEnt)
+		do, err := parent.Dir.Put(ctx, store, dirEnt)
 		if err != nil {
 			return nil, err
 		}
@@ -247,10 +282,26 @@ func (wfs *WebFS) Mkdir(ctx context.Context, p string) error {
 	default:
 		return errors.New("Can't create dir in non dir")
 	}
-	return Apply(ctx, res.Cell, func(cur Object) (*Object, error) {
+
+	return Apply(ctx, res.Cell, func(cur CellContents) (*CellContents, error) {
 		d := NewDir()
 		do := Object{Dir: d}
-		return wfs.PutObject(ctx, cur, do, basep)
+		curO, err := wfs.loadObject(ctx, cur.ObjectRef)
+		if err != nil {
+			return nil, err
+		}
+		nextO, err := wfs.PutObject(ctx, *curO, do, basep, cur.Options)
+		if err != nil {
+			return nil, err
+		}
+		ref, err := wfs.storeObject(ctx, *nextO, cur.Options)
+		if err != nil {
+			return nil, err
+		}
+		return &CellContents{
+			Options:   cur.Options,
+			ObjectRef: *ref,
+		}, nil
 	})
 }
 
@@ -269,16 +320,21 @@ func (wfs *WebFS) getCell(id string) Cell {
 	return cell.(Cell)
 }
 
-func objectFromCell(ctx context.Context, cell Cell) (*Object, error) {
-	data, err := cell.Load(ctx)
+func (wfs *WebFS) loadObject(ctx context.Context, ref webref.Ref) (*Object, error) {
+	obj := &Object{}
+	data, err := ref.Deref(ctx, wfs.muxStore)
 	if err != nil {
 		return nil, err
 	}
-	o := Object{}
-	if err := json.Unmarshal(data, &o); err != nil {
+	if err := obj.Unmarshal(data); err != nil {
 		return nil, err
 	}
-	return &o, nil
+	return obj, nil
+}
+
+func (wfs *WebFS) storeObject(ctx context.Context, obj Object, opts Options) (*webref.Ref, error) {
+	data := obj.Marshal()
+	return webref.Post(ctx, wfs.muxStore, data, opts)
 }
 
 func (wfs *WebFS) Cat(ctx context.Context, p string) (io.ReadCloser, error) {
@@ -286,10 +342,11 @@ func (wfs *WebFS) Cat(ctx context.Context, p string) (io.ReadCloser, error) {
 	if err != nil {
 		return nil, err
 	}
+	store := &Store{ms: wfs.muxStore, opts: res.Options}
 	o := res.Object
 	switch {
 	case o.File != nil:
-		r := o.File.Reader(wfs.store)
+		r := o.File.Reader(store)
 		return r, nil
 	default:
 		panic("")

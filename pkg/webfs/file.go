@@ -7,8 +7,8 @@ import (
 	"errors"
 	"io"
 
-	"github.com/brendoncarroll/webfs/pkg/merkleds"
 	"github.com/brendoncarroll/webfs/pkg/webref"
+	"github.com/brendoncarroll/webfs/pkg/wrds"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -16,14 +16,14 @@ type File struct {
 	Checksum []byte `json:"checksum"`
 	Size     uint64 `json:"size"`
 
-	Tree *merkleds.Tree `json:"tree"`
+	Tree *wrds.Tree `json:"tree"`
 }
 
 func NewFile(ctx context.Context, s ReadWriteOnce, r io.Reader) (*File, error) {
 	if r == nil {
 		r = &bytes.Buffer{}
 	}
-	f := &File{Tree: merkleds.NewTree()}
+	f := &File{Tree: wrds.NewTree()}
 	h := sha3.New256()
 
 	buf := make([]byte, s.MaxBlobSize())
@@ -64,6 +64,15 @@ func NewFile(ctx context.Context, s ReadWriteOnce, r io.Reader) (*File, error) {
 	return f, nil
 }
 
+// Split attempts to make the file smaller.
+func (f *File) Split(ctx context.Context, store ReadWriteOnce) (*File, error) {
+	newTree, err := f.Tree.Split(ctx, store)
+	if err != nil {
+		return nil, err
+	}
+	return &File{Tree: newTree}, nil
+}
+
 func (f *File) Reader(store webref.Read) io.ReadCloser {
 	return newFileHandle(store, f)
 }
@@ -80,7 +89,7 @@ type FileHandle struct {
 	offset uint64
 	file   *File
 
-	ti *merkleds.TreeIter
+	ti *wrds.TreeIter
 }
 
 func (fh *FileHandle) Seek(offset int64, whence int) (ret int64, err error) {

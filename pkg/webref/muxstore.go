@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/brendoncarroll/webfs/pkg/stores"
+	"github.com/brendoncarroll/webfs/pkg/stores/cahttp"
 )
 
 type MuxStore struct {
@@ -16,7 +17,7 @@ func NewMuxStore() *MuxStore {
 	ms := &MuxStore{
 		stores: make(map[string]stores.Read),
 	}
-	ms.stores["bc"] = stores.NewCAHttp("http://127.0.0.1:6667")
+	ms.stores["bc"] = cahttp.NewCAHttp("http://127.0.0.1:6667")
 	return ms
 }
 

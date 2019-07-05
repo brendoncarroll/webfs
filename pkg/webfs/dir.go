@@ -7,15 +7,14 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/brendoncarroll/webfs/pkg/merkleds"
 	"github.com/brendoncarroll/webfs/pkg/webref"
+	"github.com/brendoncarroll/webfs/pkg/wrds"
 )
 
 type Object struct {
 	File *File     `json:"file,omitempty"`
 	Dir  *Dir      `json:"dir,omitempty"`
 	Cell *CellSpec `json:"cell,omitempty"`
-	//Union *UnionSpec `json:"union"`
 }
 
 func (o Object) Marshal() []byte {
@@ -24,6 +23,10 @@ func (o Object) Marshal() []byte {
 		panic(err)
 	}
 	return data
+}
+
+func (o *Object) Unmarshal(data []byte) error {
+	return json.Unmarshal(data, o)
 }
 
 func (o Object) String() string {
@@ -40,7 +43,7 @@ func (o Object) String() string {
 }
 
 type Dir struct {
-	Tree *merkleds.Tree `json:"tree"`
+	Tree *wrds.Tree `json:"tree"`
 }
 
 type DirEntry struct {
@@ -49,7 +52,15 @@ type DirEntry struct {
 }
 
 func NewDir() *Dir {
-	return &Dir{Tree: merkleds.NewTree()}
+	return &Dir{Tree: wrds.NewTree()}
+}
+
+func (d *Dir) Split(ctx context.Context, s ReadWriteOnce) (*Dir, error) {
+	newTree, err := d.Tree.Split(ctx, s)
+	if err != nil {
+		return nil, err
+	}
+	return &Dir{Tree: newTree}, nil
 }
 
 func (d *Dir) Get(ctx context.Context, store Read, p string) (*Object, error) {

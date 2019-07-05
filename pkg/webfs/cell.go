@@ -1,37 +1,51 @@
 package webfs
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"sync"
+
+	"github.com/brendoncarroll/webfs/pkg/cells"
+	"github.com/brendoncarroll/webfs/pkg/cells/httpcell"
+
+	"github.com/brendoncarroll/webfs/pkg/webref"
 )
 
+type Cell = cells.Cell
+type CASCell = cells.CASCell
+
 type CellSpec struct {
-	EncAlgo string
-	Secret  []byte
+	HTTPCell *httpcell.Spec
+	// Do not add FileCell or MemCell here
 }
 
-func (spec *CellSpec) ID() string {
-	return "cell-a"
+type CellContents struct {
+	ObjectRef webref.Ref `json:"object_ref"`
+	Options   Options    `json:"options"`
 }
 
-func NewCell(spec CellSpec) Cell {
-	return nil
+func (cc *CellContents) Marshal() []byte {
+	data, _ := json.Marshal(cc)
+	return data
 }
 
-type Cell interface {
-	ID() string
-	Load(ctx context.Context) ([]byte, error)
+func (cc *CellContents) Unmarshal(data []byte) error {
+	return json.Unmarshal(data, cc)
 }
 
-type CASCell interface {
-	Cell
-	CAS(ctx context.Context, cur, next []byte) (bool, error)
-}
+type CellMutator func(CellContents) (*CellContents, error)
 
-type CellMutator func(Object) (*Object, error)
+func GetContents(ctx context.Context, cell Cell) (*CellContents, error) {
+	data, err := cell.Load(ctx)
+	if err != nil {
+		return nil, err
+	}
+	cc := CellContents{}
+	if err := cc.Unmarshal(data); err != nil {
+		return nil, err
+	}
+	return &cc, nil
+}
 
 func Apply(ctx context.Context, cell Cell, f CellMutator) error {
 	wcell, ok := cell.(CASCell)
@@ -46,20 +60,15 @@ func Apply(ctx context.Context, cell Cell, f CellMutator) error {
 		if err != nil {
 			return err
 		}
-
-		currentO := Object{}
-		if err := json.Unmarshal(current, &currentO); err != nil {
+		currentC := CellContents{}
+		if err := currentC.Unmarshal(current); err != nil {
 			return err
 		}
-
-		nextO, err := f(currentO)
+		nextC, err := f(currentC)
 		if err != nil {
 			return err
 		}
-		next, err := json.Marshal(nextO)
-		if err != nil {
-			return err
-		}
+		next := nextC.Marshal()
 		success, err = wcell.CAS(ctx, current, next)
 		if err != nil {
 			return err
@@ -71,39 +80,4 @@ func Apply(ctx context.Context, cell Cell, f CellMutator) error {
 	}
 
 	return nil
-}
-
-type RootCell struct {
-	mu         sync.Mutex
-	data       []byte
-	superblock *Superblock
-}
-
-func (rc *RootCell) ID() string {
-	return ""
-}
-
-func (rc *RootCell) Load(ctx context.Context) ([]byte, error) {
-	rc.mu.Lock()
-	defer rc.mu.Unlock()
-	data, err := rc.superblock.LoadRoot()
-	if err != nil {
-		return nil, err
-	}
-	rc.data = data
-	return data, nil
-}
-
-func (rc *RootCell) CAS(ctx context.Context, cur []byte, next []byte) (bool, error) {
-	rc.mu.Lock()
-	defer rc.mu.Unlock()
-
-	if bytes.Compare(rc.data, cur) != 0 {
-		return false, nil
-	}
-	if err := rc.superblock.StoreRoot(next); err != nil {
-		return false, err
-	}
-	rc.data = next
-	return true, nil
 }

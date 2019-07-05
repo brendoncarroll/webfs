@@ -16,19 +16,8 @@ type Store struct {
 	opts webref.Options
 }
 
-func NewStore() *Store {
-	return &Store{
-		ms: webref.NewMuxStore(),
-		opts: webref.Options{
-			Replicas: map[string]int{
-				"bc://": 1,
-			},
-		},
-	}
-}
-
 func (s *Store) Post(ctx context.Context, data []byte) (*Ref, error) {
-	return webref.PostRepPack(ctx, s.ms, data, s.opts)
+	return webref.Post(ctx, s.ms, data, s.opts)
 }
 
 func (s *Store) Get(ctx context.Context, ref Ref) ([]byte, error) {

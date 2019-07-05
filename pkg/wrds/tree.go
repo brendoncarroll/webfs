@@ -1,9 +1,10 @@
-package merkleds
+package wrds
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"sort"
 
 	"github.com/brendoncarroll/webfs/pkg/webref"
@@ -32,10 +33,42 @@ func NewTree() *Tree {
 }
 
 func (t *Tree) Put(ctx context.Context, s ReadWriteOnce, key []byte, ref Ref) (*Tree, error) {
-	// this is wrong, but it seems to work
-	i := t.indexOf(key)
-	entries := []TreeEntry{}
+	ent := TreeEntry{Key: key, Ref: ref}
+	newTree, err := t.put(ctx, s, ent)
+	if err != nil {
+		return nil, err
+	}
+	return newTree, nil
+}
 
+// Split forces the root to split.  The 2 subtrees are posted to s, and a new root is created and returned.
+// Split should be called if the containing data structure can't fit a node into a blob.
+func (t *Tree) Split(ctx context.Context, s ReadWriteOnce) (*Tree, error) {
+	low, high := t.split()
+	newTree := Tree{Level: t.Level + 1}
+
+	for _, st := range []Tree{low, high} {
+		data := st.Marshal()
+		ref, err := s.Post(ctx, data)
+		if err != nil {
+			return nil, err
+		}
+		ent := TreeEntry{Key: st.MinKey(), Ref: *ref}
+		newTree.Entries = append(newTree.Entries, ent)
+	}
+	return &newTree, nil
+}
+
+func (t *Tree) put(ctx context.Context, s ReadWriteOnce, ent TreeEntry) (*Tree, error) {
+	i := t.indexOf(ent.Key)
+	entries := []TreeEntry{}
+	entries = append(entries, t.Entries[:i]...)
+
+	if t.Level > 1 && i >= len(t.Entries) {
+		return nil, errors.New("invalid tree: higher order tree with no entries")
+	}
+
+	// find subtree and recurse
 	if t.Level > 1 {
 		subTree := &Tree{}
 		stData, err := s.Get(ctx, t.Entries[i].Ref)
@@ -45,56 +78,34 @@ func (t *Tree) Put(ctx context.Context, s ReadWriteOnce, key []byte, ref Ref) (*
 		if err := subTree.Unmarshal(stData); err != nil {
 			return nil, err
 		}
-		subTree, err = subTree.Put(ctx, s, key, ref)
+		subTree, err = subTree.put(ctx, s, ent)
 		if err != nil {
 			return nil, err
 		}
-		stData = subTree.Marshal()
-		stRef, err := s.Post(ctx, stData)
-		if err != nil {
-			return nil, err
+
+		subTrees := []Tree{*subTree}
+		data := subTree.Marshal()
+		// check if we need to split
+		if len(data) > s.MaxBlobSize() {
+			low, high := subTree.split()
+			subTrees = []Tree{low, high}
 		}
-		ref = *stRef
-	}
-
-	entries = []TreeEntry{
-		{Key: key, Ref: ref},
-	}
-
-	// insert into this node
-	ret := Tree{Level: t.Level}
-	ret.Entries = append(ret.Entries, t.Entries[:i]...)
-	ret.Entries = append(ret.Entries, entries...)
-	if (i + 1) < len(t.Entries) {
-		ret.Entries = append(ret.Entries, t.Entries[i+1:]...)
-	}
-
-	// see if we need to split
-	data := ret.Marshal()
-	maxSize := s.MaxBlobSize()
-	if maxSize < minTreeSize {
-		panic("maxSize too small")
-	}
-	if len(data) > maxSize {
-		low, high := ret.split()
-		subtrees := []*Tree{low, high}
-		entries := []TreeEntry{}
-		for _, subtree := range subtrees {
-			data := subtree.Marshal()
-			stRef, err := s.Post(ctx, data)
+		// we either have one or 2 subtrees, post them all and convert to entries
+		for _, st := range subTrees {
+			data := st.Marshal()
+			ref, err := s.Post(ctx, data)
 			if err != nil {
 				return nil, err
 			}
-			entry := TreeEntry{
-				Key: subtree.MinKey(),
-				Ref: *stRef,
-			}
-			entries = append(entries, entry)
+			stEnt := TreeEntry{Key: st.MinKey(), Ref: *ref}
+			entries = append(entries, stEnt)
 		}
-		ret = Tree{Level: ret.Level + 1, Entries: entries}
+	} else {
+		entries = append(entries, ent)
 	}
-
-	return &ret, nil
+	entries = append(entries, t.Entries[i:]...)
+	newTree := Tree{Level: t.Level, Entries: entries}
+	return &newTree, nil
 }
 
 func (t *Tree) indexOf(key []byte) int {
@@ -162,20 +173,26 @@ func (t *Tree) Get(ctx context.Context, s Read, key []byte) (*TreeEntry, error) 
 	return nil, nil
 }
 
-func merge(ctx context.Context, s WriteOnce, a, b *Tree) (*Tree, error) {
-	t := &Tree{}
+func merge(a, b Tree) Tree {
+	t := Tree{}
 	for _, e := range a.Entries {
 		t.Entries = append(t.Entries, e)
 	}
 	for _, e := range b.Entries {
 		t.Entries = append(t.Entries, e)
 	}
-	return t, nil
+	sort.SliceStable(t.Entries, func(i, j int) bool {
+		return bytes.Compare(t.Entries[i].Key, t.Entries[j].Key) < 0
+	})
+	return t
 }
 
-func (t *Tree) split() (low, high *Tree) {
-	low = &Tree{}
-	high = &Tree{}
+func (t *Tree) split() (low, high Tree) {
+	if len(t.Entries) < 2 {
+		panic("split tree with < 2 entries")
+	}
+	low = Tree{}
+	high = Tree{}
 
 	mid := len(t.Entries) / 2
 	lowEntries, highEntries := t.Entries[:mid], t.Entries[mid:]
@@ -190,6 +207,28 @@ func (t *Tree) MinKey() []byte {
 		return t.Entries[0].Key
 	}
 	return nil
+}
+
+func (t *Tree) MaxKey(ctx context.Context, s Read) ([]byte, error) {
+	l := len(t.Entries)
+	switch {
+	case l < 1:
+		return nil, nil
+	case t.Level == 1:
+		return t.Entries[l-1].Key, nil
+	case t.Level > 1:
+		subTree := Tree{}
+		data, err := s.Get(ctx, t.Entries[l-1].Ref)
+		if err != nil {
+			return nil, err
+		}
+		if err := subTree.Unmarshal(data); err != nil {
+			return nil, err
+		}
+		return subTree.MaxKey(ctx, s)
+	default:
+		return nil, errors.New("invalid tree: level < 1")
+	}
 }
 
 func (t *Tree) Unmarshal(data []byte) error {

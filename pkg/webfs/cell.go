@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 
 	"github.com/brendoncarroll/webfs/pkg/cells"
 	"github.com/brendoncarroll/webfs/pkg/cells/httpcell"
@@ -50,6 +51,7 @@ func GetContents(ctx context.Context, cell Cell) (*CellContents, error) {
 func Apply(ctx context.Context, cell Cell, f CellMutator) error {
 	wcell, ok := cell.(CASCell)
 	if !ok {
+		log.Println(cell)
 		return errors.New("cell is not writeable")
 	}
 

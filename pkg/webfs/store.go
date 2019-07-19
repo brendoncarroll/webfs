@@ -3,6 +3,7 @@ package webfs
 import (
 	"context"
 
+	"github.com/brendoncarroll/webfs/pkg/stores"
 	"github.com/brendoncarroll/webfs/pkg/webref"
 )
 
@@ -12,7 +13,7 @@ type Read = webref.Read
 type ReadWriteOnce = webref.ReadWriteOnce
 
 type Store struct {
-	ms   *webref.MuxStore
+	ms   stores.ReadWriteOnce
 	opts webref.Options
 }
 
@@ -29,5 +30,5 @@ func (s *Store) MaxBlobSize() int {
 }
 
 func (s *Store) Check(ctx context.Context, key string) (bool, error) {
-	return s.ms.Check(ctx, key)
+	return s.ms.(stores.Check).Check(ctx, key)
 }

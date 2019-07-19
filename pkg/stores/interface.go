@@ -4,6 +4,9 @@ import "context"
 
 type Read interface {
 	Get(ctx context.Context, k string) ([]byte, error)
+}
+
+type Check interface {
 	Check(ctx context.Context, k string) (bool, error)
 }
 

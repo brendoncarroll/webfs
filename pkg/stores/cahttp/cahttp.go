@@ -11,16 +11,18 @@ import (
 	"strings"
 )
 
+const MaxBlobSize = 1 << 16
+
 type CAHttpStore struct {
-	u           string
+	endpoint    string
 	prefix      string
 	maxBlobSize int
 }
 
-func NewCAHttp(u string, prefix string) *CAHttpStore {
+func NewCAHttp(endpoint string, prefix string) *CAHttpStore {
 	return &CAHttpStore{
-		u:           u,
-		maxBlobSize: 1 << 16,
+		endpoint:    endpoint,
+		maxBlobSize: MaxBlobSize,
 		prefix:      prefix,
 	}
 }
@@ -31,7 +33,7 @@ func (hs *CAHttpStore) Get(ctx context.Context, key string) ([]byte, error) {
 		return nil, err
 	}
 
-	resp, err := http.Get(hs.u + "/" + key2)
+	resp, err := http.Get(hs.endpoint + "/" + key2)
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +65,7 @@ func (hs *CAHttpStore) Post(ctx context.Context, prefix string, data []byte) (st
 	}
 
 	buf := bytes.NewBuffer(data)
-	resp, err := http.Post(hs.u, `application/data`, buf)
+	resp, err := http.Post(hs.endpoint, `application/data`, buf)
 	if err != nil {
 		return "", err
 	}

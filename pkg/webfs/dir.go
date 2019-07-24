@@ -4,42 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
+	"time"
 
 	"github.com/brendoncarroll/webfs/pkg/webref"
 	"github.com/brendoncarroll/webfs/pkg/wrds"
 )
 
-type Object struct {
-	File *File     `json:"file,omitempty"`
-	Dir  *Dir      `json:"dir,omitempty"`
-	Cell *CellSpec `json:"cell,omitempty"`
-}
-
-func (o Object) Marshal() []byte {
-	data, err := json.Marshal(o)
-	if err != nil {
-		panic(err)
-	}
-	return data
-}
-
-func (o *Object) Unmarshal(data []byte) error {
-	return json.Unmarshal(data, o)
-}
-
-func (o Object) String() string {
-	inner := ""
-	switch {
-	case o.File != nil:
-		inner = "File"
-	case o.Dir != nil:
-		inner = "Dir"
-	case o.Cell != nil:
-		inner = "Cell"
-	}
-	return fmt.Sprintf("Object{%s}", inner)
+type Snapshot struct {
+	Cell      CellSpec     `json:"cell"`
+	Contents  CellContents `json:"contents"`
+	Timestamp time.Time    `json:"timestamp"`
 }
 
 type Dir struct {
@@ -104,6 +79,15 @@ func (d *Dir) Put(ctx context.Context, store ReadWriteOnce, ent DirEntry) (*Dir,
 	return &Dir{Tree: tree}, nil
 }
 
+func (d *Dir) Delete(ctx context.Context, store webref.ReadWriteOnce, name string) (*Dir, error) {
+	key := []byte(name)
+	newTree, err := d.Tree.Delete(ctx, store, key)
+	if err != nil {
+		return nil, err
+	}
+	return &Dir{Tree: newTree}, nil
+}
+
 func (d *Dir) Entries(ctx context.Context, store webref.Read) ([]DirEntry, error) {
 	entries := []DirEntry{}
 	iter, err := d.Tree.Iterate(ctx, store, nil)
@@ -127,6 +111,10 @@ func (d *Dir) Entries(ctx context.Context, store webref.Read) ([]DirEntry, error
 	}
 
 	return entries, nil
+}
+
+func (d *Dir) RefIter(ctx context.Context, store Read, f func(Ref) bool) (bool, error) {
+	return refIterTree(ctx, store, d.Tree, f)
 }
 
 func getDirEnt(ctx context.Context, store Read, ref Ref) (*DirEntry, error) {

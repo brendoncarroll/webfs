@@ -311,11 +311,139 @@ func (wfs *WebFS) Cat(ctx context.Context, p string) (io.ReadCloser, error) {
 	o := res.Object
 	switch {
 	case o.File != nil:
-		r := o.File.Reader(store)
+		r := o.File.GetHandle(store)
 		return r, nil
 	default:
 		return nil, fmt.Errorf("can't cat non-file %v", o)
 	}
+}
+
+func (wfs *WebFS) OpenFile(ctx context.Context, p string) (*FileHandle, error) {
+	res, err := wfs.Lookup(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	if res.Object.File == nil {
+		return nil, errors.New("Cannot open non-file")
+	}
+	return res.Object.File.GetHandle(wfs.getReadStore()), nil
+}
+
+func (wfs *WebFS) Delete(ctx context.Context, p string) error {
+	dirp := path.Dir(p)
+	basep := path.Base(p)
+	if basep == p {
+		return errors.New("cannot delete " + p)
+	}
+
+	res, err := wfs.Lookup(ctx, dirp)
+	if err != nil {
+		return err
+	}
+
+	return Apply(ctx, res.Cell, func(cur CellContents) (*CellContents, error) {
+		o, err := wfs.loadObject(ctx, cur.ObjectRef)
+		if err != nil {
+			return nil, err
+		}
+		if o.Dir != nil {
+			return nil, errors.New("invalid path " + p)
+		}
+
+		newDir, err := o.Dir.Delete(ctx, wfs.getWriteStore(cur.Options), basep)
+		newO := Object{Dir: newDir}
+		ref, err := wfs.storeObject(ctx, newO, cur.Options)
+		if err != nil {
+			return nil, err
+		}
+		newContents := &CellContents{
+			ObjectRef: *ref,
+			Options:   cur.Options,
+		}
+		return newContents, nil
+	})
+}
+
+func (wfs *WebFS) WalkObjects(ctx context.Context, f func(o Object) bool) error {
+	res, err := wfs.Lookup(ctx, "")
+	if err != nil {
+		return err
+	}
+	_, err = wfs.walkObjects(ctx, res.Object, f)
+
+	return err
+}
+
+func (wfs *WebFS) walkObjects(ctx context.Context, o Object, f func(Object) bool) (bool, error) {
+	if !f(o) {
+		return false, nil
+	}
+	switch {
+	case o.File != nil:
+	case o.Dir != nil:
+		entries, err := o.Dir.Entries(ctx, wfs.getReadStore())
+		if err != nil {
+			return false, err
+		}
+		for _, e := range entries {
+			o2 := e.Object
+			cont, err := wfs.walkObjects(ctx, o2, f)
+			if err != nil {
+				return false, err
+			}
+			if !cont {
+				return false, err
+			}
+		}
+	case o.Cell != nil:
+		cell := wfs.getCellBySpec(*o.Cell)
+		cc, err := GetContents(ctx, cell)
+		if err != nil {
+			return false, err
+		}
+		o2, err := wfs.loadObject(ctx, cc.ObjectRef)
+		if err != nil {
+			return false, err
+		}
+		return wfs.walkObjects(ctx, *o2, f)
+	}
+	return true, nil
+}
+
+func (wfs *WebFS) RefIter(ctx context.Context, f func(ref Ref) bool) error {
+	var err1 error
+	err := wfs.WalkObjects(ctx, func(o Object) bool {
+		switch {
+		case o.File != nil:
+			cont, err := o.File.RefIter(ctx, wfs.getReadStore(), f)
+			if err != nil {
+				err1 = err
+				return false
+			}
+			return cont
+		case o.Dir != nil:
+			cont, err := o.Dir.RefIter(ctx, wfs.getReadStore(), f)
+			if err != nil {
+				err1 = err
+				return false
+			}
+			return cont
+		case o.Cell != nil:
+			cell := wfs.getCellBySpec(*o.Cell)
+			cc, err := GetContents(ctx, cell)
+			if err != nil {
+				err1 = err
+				return false
+			}
+			return f(cc.ObjectRef)
+		default:
+			panic("invalid object")
+		}
+	})
+	if err != nil {
+		return err
+	}
+	return err1
 }
 
 func (wfs *WebFS) addCell(cell Cell) {
@@ -360,6 +488,15 @@ func (wfs *WebFS) loadObject(ctx context.Context, ref webref.Ref) (*Object, erro
 func (wfs *WebFS) storeObject(ctx context.Context, obj Object, opts Options) (*webref.Ref, error) {
 	data := obj.Marshal()
 	return webref.Post(ctx, wfs.store, data, opts)
+}
+
+func (wfs *WebFS) getReadStore() webref.Read {
+	// no options required for read
+	return &Store{ms: wfs.store}
+}
+
+func (wfs *WebFS) getWriteStore(opts Options) webref.ReadWriteOnce {
+	return &Store{ms: wfs.store, opts: opts}
 }
 
 func dirpath(p string) string {

@@ -64,7 +64,7 @@ func (t *Tree) put(ctx context.Context, s ReadWriteOnce, ent TreeEntry) (*Tree, 
 	entries := []TreeEntry{}
 	entries = append(entries, t.Entries[:i]...)
 
-	if t.Level > 1 && i >= len(t.Entries) {
+	if t.Level > 1 && i < len(t.Entries) {
 		return nil, errors.New("invalid tree: higher order tree with no entries")
 	}
 
@@ -109,16 +109,27 @@ func (t *Tree) put(ctx context.Context, s ReadWriteOnce, ent TreeEntry) (*Tree, 
 }
 
 func (t *Tree) indexOf(key []byte) int {
-	i := sort.Search(len(t.Entries), func(i int) bool {
-		return bytes.Compare(t.Entries[i].Key, key) >= 0
-	})
+	// TODO: binary search
+	var (
+		i int
+		e TreeEntry
+	)
+	for i, e = range t.Entries {
+		cmp := bytes.Compare(e.Key, key)
+		switch {
+		case cmp > 0:
+			return i - 1
+		case cmp == 0:
+			return i
+		}
+	}
 	return i
 }
 
 // MaxLteq finds the max entry below key.
 func (t *Tree) MaxLteq(ctx context.Context, s webref.Read, key []byte) (*TreeEntry, error) {
 	i := t.indexOf(key)
-	if i >= len(t.Entries) {
+	if i == -1 {
 		return nil, nil
 	}
 	switch {
@@ -132,9 +143,11 @@ func (t *Tree) MaxLteq(ctx context.Context, s webref.Read, key []byte) (*TreeEnt
 			return nil, err
 		}
 		return subtree.MaxLteq(ctx, s, key)
-	default:
+	case t.Level == 1:
 		entry := t.Entries[i]
 		return &entry, nil
+	default:
+		return nil, errors.New("invalid tree")
 	}
 }
 
@@ -173,33 +186,54 @@ func (t *Tree) Get(ctx context.Context, s Read, key []byte) (*TreeEntry, error) 
 	return nil, nil
 }
 
-func merge(a, b Tree) Tree {
-	t := Tree{}
-	for _, e := range a.Entries {
-		t.Entries = append(t.Entries, e)
-	}
-	for _, e := range b.Entries {
-		t.Entries = append(t.Entries, e)
-	}
-	sort.SliceStable(t.Entries, func(i, j int) bool {
-		return bytes.Compare(t.Entries[i].Key, t.Entries[j].Key) < 0
-	})
-	return t
+func (t *Tree) Delete(ctx context.Context, s ReadWriteOnce, key []byte) (*Tree, error) {
+	return t.delete(ctx, s, key)
 }
 
-func (t *Tree) split() (low, high Tree) {
-	if len(t.Entries) < 2 {
-		panic("split tree with < 2 entries")
+func (t *Tree) delete(ctx context.Context, s ReadWriteOnce, key []byte) (*Tree, error) {
+	// TODO: not balanced
+	i := t.indexOf(key)
+	if i >= len(t.Entries) {
+		return nil, errors.New("no entry found")
 	}
-	low = Tree{}
-	high = Tree{}
 
-	mid := len(t.Entries) / 2
-	lowEntries, highEntries := t.Entries[:mid], t.Entries[mid:]
+	switch {
+	case t.Level == 1:
+		newEntries := []TreeEntry{}
+		newEntries = append(newEntries, t.Entries[:i]...)
+		newEntries = append(newEntries, t.Entries[i+1:]...)
+		if len(newEntries) == 0 {
+			return nil, nil
+		}
+		newTree := Tree{Entries: newEntries}
+		return &newTree, nil
+	case t.Level > 1:
+		subTree, err := t.getSubtree(ctx, s, i)
+		if err != nil {
+			return nil, err
+		}
+		newSt, err := subTree.delete(ctx, s, key)
+		if err != nil {
+			return nil, err
+		}
 
-	low.Entries = lowEntries
-	high.Entries = highEntries
-	return low, high
+		newEntries := []TreeEntry{}
+		newEntries = append(newEntries, t.Entries[:i]...)
+		if newSt != nil {
+			data := newSt.Marshal()
+			ref, err := s.Post(ctx, data)
+			if err != nil {
+				return nil, err
+			}
+			newEnt := TreeEntry{Key: t.Entries[i].Key, Ref: *ref}
+			newEntries = append(newEntries, newEnt)
+		}
+		newEntries = append(newEntries, t.Entries[i+1:]...)
+		newTree := Tree{Level: t.Level, Entries: newEntries}
+		return &newTree, nil
+	default:
+		return nil, errors.New("invalid tree level")
+	}
 }
 
 func (t *Tree) MinKey() []byte {
@@ -243,6 +277,35 @@ func (t *Tree) Marshal() []byte {
 	return data
 }
 
+func merge(a, b Tree) Tree {
+	t := Tree{}
+	for _, e := range a.Entries {
+		t.Entries = append(t.Entries, e)
+	}
+	for _, e := range b.Entries {
+		t.Entries = append(t.Entries, e)
+	}
+	sort.SliceStable(t.Entries, func(i, j int) bool {
+		return bytes.Compare(t.Entries[i].Key, t.Entries[j].Key) < 0
+	})
+	return t
+}
+
+func (t *Tree) split() (low, high Tree) {
+	if len(t.Entries) < 2 {
+		panic("split tree with < 2 entries")
+	}
+	low = Tree{}
+	high = Tree{}
+
+	mid := len(t.Entries) / 2
+	lowEntries, highEntries := t.Entries[:mid], t.Entries[mid:]
+
+	low.Entries = lowEntries
+	high.Entries = highEntries
+	return low, high
+}
+
 func (t *Tree) getSubtree(ctx context.Context, s Read, i int) (*Tree, error) {
 	ent := t.Entries[i]
 	data, err := s.Get(ctx, ent.Ref)
@@ -254,40 +317,4 @@ func (t *Tree) getSubtree(ctx context.Context, s Read, i int) (*Tree, error) {
 		return nil, err
 	}
 	return &subtree, nil
-}
-
-func (t *Tree) Iterate(ctx context.Context, store Read, startKey []byte) (*TreeIter, error) {
-	var lastKey []byte
-	if len(startKey) > 0 {
-		ent, err := t.MaxLteq(ctx, store, startKey)
-		if err != nil {
-			return nil, err
-		}
-		if ent != nil && bytes.Compare(ent.Key, startKey) != 0 {
-			lastKey = ent.Key
-		}
-	}
-
-	return &TreeIter{
-		tree:    t,
-		store:   store,
-		lastKey: lastKey,
-	}, nil
-}
-
-type TreeIter struct {
-	store   Read
-	tree    *Tree
-	lastKey []byte
-}
-
-func (ti *TreeIter) Next(ctx context.Context) (*TreeEntry, error) {
-	ent, err := ti.tree.MinGt(ctx, ti.store, ti.lastKey)
-	if err != nil {
-		return nil, err
-	}
-	if ent != nil {
-		ti.lastKey = ent.Key
-	}
-	return ent, nil
 }

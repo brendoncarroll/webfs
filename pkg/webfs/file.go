@@ -73,7 +73,11 @@ func (f *File) Split(ctx context.Context, store ReadWriteOnce) (*File, error) {
 	return &File{Tree: newTree}, nil
 }
 
-func (f *File) Reader(store webref.Read) io.ReadCloser {
+func (f *File) RefIter(ctx context.Context, store Read, fn func(Ref) bool) (bool, error) {
+	return refIterTree(ctx, store, f.Tree, fn)
+}
+
+func (f *File) GetHandle(store webref.Read) *FileHandle {
 	return newFileHandle(store, f)
 }
 
@@ -94,11 +98,11 @@ type FileHandle struct {
 
 func (fh *FileHandle) Seek(offset int64, whence int) (ret int64, err error) {
 	switch whence {
-	case 0:
+	case io.SeekStart:
 		fh.offset = uint64(offset)
-	case 1:
+	case io.SeekCurrent:
 		fh.offset = uint64(int64(fh.offset) + offset)
-	case 2:
+	case io.SeekEnd:
 		o := int64(fh.file.Size) - offset
 		if o < 0 {
 			return 0, errors.New("negative offset")
@@ -153,4 +157,24 @@ func offset2Key(x uint64) []byte {
 
 func key2Offset(x []byte) uint64 {
 	return binary.BigEndian.Uint64(x)
+}
+
+func refIterTree(ctx context.Context, store Read, t *wrds.Tree, f func(Ref) bool) (bool, error) {
+	iter, err := t.Iterate(ctx, store, nil)
+	if err != nil {
+		return false, err
+	}
+
+	cont := true
+	for cont {
+		entry, err := iter.Next(ctx)
+		if err != nil {
+			return false, err
+		}
+		if entry == nil {
+			return false, nil
+		}
+		cont = f(entry.Ref)
+	}
+	return cont, nil
 }

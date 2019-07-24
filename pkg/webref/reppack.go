@@ -47,6 +47,15 @@ func (r *RepPackRef) Deref(ctx context.Context, s stores.Read) ([]byte, error) {
 	}
 }
 
+func (r *Ref) GetURLs() []string {
+	switch {
+	case r.Single != nil:
+		return []string{r.Single.URL}
+	default:
+		return nil
+	}
+}
+
 type Mirror struct {
 	Replicas []RepPackRef `json:"replicas"`
 }

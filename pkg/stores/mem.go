@@ -9,6 +9,10 @@ type MemStore struct {
 	m sync.Map
 }
 
+func NewMemStore() *MemStore {
+	return &MemStore{}
+}
+
 func (s *MemStore) Post(ctx context.Context, key string, data []byte) (string, error) {
 	s.m.Store(key, data)
 	return key, nil

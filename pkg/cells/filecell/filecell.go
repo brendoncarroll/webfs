@@ -3,6 +3,7 @@ package filecell
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io/ioutil"
 	"sync"
 
@@ -40,6 +41,7 @@ func (c *Cell) Load(ctx context.Context) ([]byte, error) {
 }
 
 func (c *Cell) CAS(ctx context.Context, cur, next []byte) (bool, error) {
+	next = reformat(next)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -56,4 +58,14 @@ func (c *Cell) CAS(ctx context.Context, cur, next []byte) (bool, error) {
 	}
 
 	return false, nil
+}
+
+func reformat(x []byte) []byte {
+	var v map[string]interface{}
+	if err := json.Unmarshal(x, &v); err != nil {
+		panic(err)
+		return x
+	}
+	y, _ := json.MarshalIndent(v, "", "  ")
+	return y
 }

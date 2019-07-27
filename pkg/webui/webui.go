@@ -37,20 +37,18 @@ type FileSystem struct {
 
 func (fs *FileSystem) Open(p string) (http.File, error) {
 	ctx := context.TODO()
-	res, err := fs.wfs.Lookup(ctx, p)
+	o, err := fs.wfs.Lookup(ctx, p)
 	if err != nil {
 		return nil, err
 	}
-	log.Println("open", res)
+	log.Println("open", o.Path())
 	return &File{
-		fs:   fs,
-		o:    res.Object,
+		o:    o,
 		path: p,
 	}, nil
 }
 
 type File struct {
-	fs   *FileSystem
 	o    webfs.Object
 	fh   *webfs.FileHandle
 	path string
@@ -61,62 +59,63 @@ func (f *File) Close() error {
 }
 
 func (f *File) Read(p []byte) (n int, err error) {
-	ctx := context.TODO()
-	if f.o.File == nil {
+	wf, ok := f.o.(*webfs.File)
+	if !ok {
 		return 0, errors.New("cannot read non-file")
 	}
+
 	if f.fh == nil {
-		f.fh, err = f.fs.wfs.OpenFile(ctx, f.path)
-		if err != nil {
-			return 0, err
-		}
+		f.fh = wf.GetHandle()
 	}
 	return f.fh.Read(p)
 }
 
 func (f *File) Seek(off int64, whence int) (int64, error) {
-	ctx := context.TODO()
-	var err error
+	wf, ok := f.o.(*webfs.File)
+	if !ok {
+		return 0, errors.New("cannot read non-file")
+	}
+
 	if f.fh == nil {
-		f.fh, err = f.fs.wfs.OpenFile(ctx, f.path)
-		if err != nil {
-			return -1, err
-		}
+		f.fh = wf.GetHandle()
 	}
 	return f.fh.Seek(off, whence)
 }
 
 func (f *File) Readdir(count int) ([]os.FileInfo, error) {
 	ctx := context.TODO()
-	if f.o.Dir == nil {
+	wd, ok := f.o.(*webfs.Dir)
+	if !ok {
 		return nil, errors.New("cannot readdir non-dir")
 	}
 
-	entries, err := f.fs.wfs.Ls(ctx, f.path)
+	entries, err := wd.Entries(ctx)
 	if err != nil {
 		return nil, err
 	}
 	finfos := make([]os.FileInfo, len(entries))
 	for i, e := range entries {
+		_, isDir := e.Object.(*webfs.Dir)
 		finfos[i] = &FileInfo{
 			name:    e.Name,
-			isDir:   e.Object.Dir != nil,
-			size:    int64(e.Object.Size()),
+			isDir:   isDir,
+			size:    int64(wd.Size()),
 			modTime: time.Now(),
-			sys:     f.fs,
+			sys:     nil,
 		}
 	}
 	return finfos, nil
 }
 
 func (f *File) Stat() (os.FileInfo, error) {
+	_, isDir := f.o.(*webfs.Dir)
 	fi := &FileInfo{
 		name:    path.Base(f.path),
 		mode:    0644,
-		isDir:   f.o.Dir != nil,
+		isDir:   isDir,
 		size:    int64(f.o.Size()),
 		modTime: time.Now(),
-		sys:     f.fs,
+		sys:     nil,
 	}
 	return fi, nil
 }

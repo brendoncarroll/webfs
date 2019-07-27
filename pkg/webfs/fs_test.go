@@ -6,23 +6,19 @@ import (
 
 	"github.com/brendoncarroll/webfs/pkg/cells"
 	"github.com/brendoncarroll/webfs/pkg/cells/memcell"
-	"github.com/stretchr/testify/assert"
+	"github.com/brendoncarroll/webfs/pkg/stores"
 	"github.com/stretchr/testify/require"
 )
 
 var ctx = context.TODO()
 
 func TestNew(t *testing.T) {
+	ms := stores.NewMemStore()
 	mc := cells.Make(memcell.Spec{})
-	wfs, err := New(mc)
+	wfs, err := New(mc, ms)
 	require.Nil(t, err)
 
 	o, err := wfs.Lookup(ctx, "")
 	require.Nil(t, err)
-	if assert.NotNil(t, o) {
-		assert.Equal(t, o.Cell, mc)
-		assert.Nil(t, o.Object.File)
-		assert.Nil(t, o.Object.Cell)
-		assert.NotNil(t, o.Object.Dir)
-	}
+	require.NotNil(t, o)
 }

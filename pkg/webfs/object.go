@@ -6,7 +6,6 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/brendoncarroll/webfs/pkg/cells"
 	"github.com/brendoncarroll/webfs/pkg/webfs/models"
 )
 
@@ -27,6 +26,7 @@ func parsePath(x string) Path {
 }
 
 type Object interface {
+	Find(ctx context.Context, p Path, objs []Object) ([]Object, error)
 	Lookup(ctx context.Context, p Path) (Object, error)
 	Walk(ctx context.Context, f func(Object) bool) (bool, error)
 	Path() Path
@@ -86,7 +86,8 @@ func wrapObject(parent Object, nameInParent string, o models.Object) (Object, er
 
 	switch {
 	case o.Cell != nil:
-		cell := cells.Make(*o.Cell)
+		wfs := parent.getFS()
+		cell := wfs.getCellBySpec(*o.Cell)
 		return &Volume{
 			cell:       cell,
 			baseObject: base,

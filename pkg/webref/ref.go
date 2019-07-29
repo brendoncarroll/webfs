@@ -8,8 +8,8 @@ import (
 
 type Ref RepPackRef
 
-func (r *Ref) Deref(ctx context.Context, s stores.Read) ([]byte, error) {
-	return (*RepPackRef)(r).Deref(ctx, s)
+func Get(ctx context.Context, s stores.Read, ref Ref) ([]byte, error) {
+	return GetRepPack(ctx, s, RepPackRef(ref))
 }
 
 func Post(ctx context.Context, s stores.WriteOnce, data []byte, opts Options) (*Ref, error) {

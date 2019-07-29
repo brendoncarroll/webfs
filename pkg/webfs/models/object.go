@@ -58,8 +58,8 @@ type CellSpec struct {
 }
 
 type Volume struct {
-	ObjectRef webref.Ref `json:"object_ref"`
-	Options   Options    `json:"options"`
+	ObjectRef *webref.Ref `json:"object_ref"`
+	Options   Options     `json:"options"`
 }
 
 func (v *Volume) Marshal() []byte {

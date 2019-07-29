@@ -41,6 +41,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 
 	case http.MethodGet:
+		log.Println("GET", p)
 		w.WriteHeader(http.StatusOK)
 		_, err := w.Write(c)
 		if err != nil {

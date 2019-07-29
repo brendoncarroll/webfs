@@ -1,6 +1,7 @@
 package cells
 
 import (
+	"log"
 	"reflect"
 )
 
@@ -17,6 +18,7 @@ func Make(spec interface{}) Cell {
 	rtype := reflect.TypeOf(spec)
 	c := constructors[rtype]
 	if c == nil {
+		log.Println(rtype, constructors)
 		panic("no constructor found for spec")
 	}
 	return c(spec)

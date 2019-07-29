@@ -60,7 +60,8 @@ func (t *Tree) Split(ctx context.Context, s ReadWriteOnce) (*Tree, error) {
 }
 
 func (t *Tree) put(ctx context.Context, s ReadWriteOnce, ent TreeEntry) (*Tree, error) {
-	i := t.indexOf(ent.Key)
+	i := t.indexPut(ent.Key)
+
 	entries := []TreeEntry{}
 	entries = append(entries, t.Entries[:i]...)
 
@@ -103,19 +104,32 @@ func (t *Tree) put(ctx context.Context, s ReadWriteOnce, ent TreeEntry) (*Tree, 
 	} else {
 		entries = append(entries, ent)
 	}
+
 	entries = append(entries, t.Entries[i:]...)
 	newTree := Tree{Level: t.Level, Entries: entries}
 	return &newTree, nil
 }
 
-func (t *Tree) indexOf(key []byte) int {
-	// TODO: binary search
+func (t *Tree) indexPut(key []byte) int {
+	var i int
+	for i = 0; i < len(t.Entries); i++ {
+		e := t.Entries[i]
+		cmp := bytes.Compare(e.Key, key)
+		if cmp >= 0 {
+			break
+		}
+	}
+	return i
+}
+
+func (t *Tree) indexGet(key []byte) int {
 	var (
-		i int
+		i = -1
 		e TreeEntry
 	)
 	for i, e = range t.Entries {
 		cmp := bytes.Compare(e.Key, key)
+
 		switch {
 		case cmp > 0:
 			return i - 1
@@ -128,7 +142,7 @@ func (t *Tree) indexOf(key []byte) int {
 
 // MaxLteq finds the max entry below key.
 func (t *Tree) MaxLteq(ctx context.Context, s webref.Read, key []byte) (*TreeEntry, error) {
-	i := t.indexOf(key)
+	i := t.indexGet(key)
 	if i == -1 {
 		return nil, nil
 	}
@@ -173,17 +187,27 @@ func (t *Tree) MinGt(ctx context.Context, s Read, key []byte) (*TreeEntry, error
 }
 
 func (t *Tree) Get(ctx context.Context, s Read, key []byte) (*TreeEntry, error) {
-	ent, err := t.MaxLteq(ctx, s, key)
-	if err != nil {
-		return nil, err
-	}
-	if ent == nil {
+	i := t.indexGet(key)
+	if i < 0 {
 		return nil, nil
 	}
-	if bytes.Compare(ent.Key, key) == 0 {
-		return ent, nil
+
+	switch {
+	case t.Level > 1:
+		subTree, err := t.getSubtree(ctx, s, i)
+		if err != nil {
+			return nil, err
+		}
+		return subTree.Get(ctx, s, key)
+	case t.Level == 1:
+		ent := t.Entries[i]
+		if bytes.Compare(key, ent.Key) == 0 {
+			return &ent, nil
+		}
+		return nil, nil
+	default:
+		return nil, errors.New("Invalid tree level")
 	}
-	return nil, nil
 }
 
 func (t *Tree) Delete(ctx context.Context, s ReadWriteOnce, key []byte) (*Tree, error) {
@@ -192,7 +216,7 @@ func (t *Tree) Delete(ctx context.Context, s ReadWriteOnce, key []byte) (*Tree, 
 
 func (t *Tree) delete(ctx context.Context, s ReadWriteOnce, key []byte) (*Tree, error) {
 	// TODO: not balanced
-	i := t.indexOf(key)
+	i := t.indexGet(key)
 	if i >= len(t.Entries) {
 		return nil, errors.New("no entry found")
 	}

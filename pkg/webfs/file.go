@@ -9,7 +9,6 @@ import (
 
 	"github.com/brendoncarroll/webfs/pkg/webfs/models"
 	"github.com/brendoncarroll/webfs/pkg/wrds"
-	"golang.org/x/crypto/sha3"
 )
 
 type FileMutator func(cur models.File) (*models.File, error)
@@ -40,11 +39,11 @@ func (f *File) SetData(ctx context.Context, r io.Reader) error {
 		r = &bytes.Buffer{}
 	}
 	m := &models.File{Tree: wrds.NewTree()}
-	h := sha3.New256()
 	buf := make([]byte, f.store.MaxBlobSize())
 	if len(buf) == 0 {
 		panic("max blob size 0")
 	}
+
 	for {
 		n, err := r.Read(buf)
 		if err == io.EOF {
@@ -54,32 +53,23 @@ func (f *File) SetData(ctx context.Context, r io.Reader) error {
 			return err
 		}
 		data := buf[:n]
-
-		n, err = h.Write(data)
+		m, err = fileWriteAt(ctx, f.store, *m, m.Size, data)
 		if err != nil {
 			return err
 		}
-
-		ref, err := f.store.Post(ctx, data)
-		if err != nil {
-			return err
-		}
-
-		key := [8]byte{}
-		binary.BigEndian.PutUint64(key[:], m.Size)
-		m.Tree, err = m.Tree.Put(ctx, f.store, key[:], *ref)
-		if err != nil {
-			return err
-		}
-
-		m.Size += uint64(n)
 	}
-	m.Checksum = h.Sum(m.Checksum)
 
 	// This is a total replace not a modification of existing content.
 	return f.apply(ctx, func(cur models.File) (*models.File, error) {
 		return m, nil
 	})
+}
+
+func (f *File) Find(ctx context.Context, p Path, objs []Object) ([]Object, error) {
+	if len(p) == 0 {
+		return []Object{f}, nil
+	}
+	return nil, errors.New("cannot lookup in file")
 }
 
 func (f *File) Lookup(ctx context.Context, p Path) (Object, error) {
@@ -96,34 +86,8 @@ func (f *File) Walk(ctx context.Context, fn func(Object) bool) (bool, error) {
 
 func (f *File) ReadAt(p []byte, off int64) (n int, err error) {
 	ctx := context.TODO()
-
 	offset := uint64(off)
-	for n < len(p) {
-		ent, err := f.m.Tree.MaxLteq(ctx, f.store, offset2Key(offset))
-		if err != nil {
-			return 0, err
-		}
-
-		if ent == nil {
-			break // done, no entry for this offset, empty file
-		}
-		o := key2Offset(ent.Key)
-		if offset < o {
-			return 0, errors.New("got wrong entry from tree")
-		}
-		relo := offset - o
-		data, err := f.store.Get(ctx, ent.Ref)
-		if err != nil {
-			return n, err
-		}
-		if int(relo) >= len(data) {
-			break // there is no more data, we must have read it all
-		}
-		n2 := copy(p, data[relo:])
-		n += n2
-		offset += uint64(n2)
-	}
-	return n, io.EOF
+	return fileReadAt(ctx, f.store, f.m, offset, p)
 }
 
 // Split attempts to make the file smaller.
@@ -159,7 +123,7 @@ func (f *File) apply(ctx context.Context, fn FileMutator) error {
 	case *Dir:
 		err = x.put(ctx, f.nameInParent, func(cur *models.Object) (*models.Object, error) {
 			curFile := f.m
-			if cur.File != nil {
+			if cur != nil && cur.File != nil {
 				curFile = *cur.File
 			}
 
@@ -185,10 +149,66 @@ func (f *File) getStore() ReadWriteOnce {
 	return f.store
 }
 
+func fileWriteAt(ctx context.Context, s ReadWriteOnce, x models.File, offset uint64, p []byte) (*models.File, error) {
+	var err error
+	y := &models.File{}
+
+	ref, err := s.Post(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+
+	key := offset2Key(offset)
+	y.Tree, err = x.Tree.Put(ctx, s, key[:], *ref)
+	if err != nil {
+		return nil, err
+	}
+
+	if offset+uint64(len(p)) > x.Size {
+		y.Size = uint64(len(p)) + offset
+	} else {
+		y.Size = x.Size
+	}
+
+	return y, nil
+}
+
+func fileReadAt(ctx context.Context, s ReadWriteOnce, x models.File, offset uint64, p []byte) (n int, err error) {
+	for n < len(p) {
+		ent, err := x.Tree.MaxLteq(ctx, s, offset2Key(offset))
+		if err != nil {
+			return 0, err
+		}
+		if ent == nil {
+			// done, no entry for this offset, empty file
+			return n, io.EOF
+		}
+
+		o := key2Offset(ent.Key)
+		if offset < o {
+			return 0, errors.New("got wrong entry from tree")
+		}
+		relo := offset - o
+		data, err := s.Get(ctx, ent.Ref)
+		if err != nil {
+			return n, err
+		}
+
+		if int(relo) >= len(data) {
+			return n, io.EOF
+		}
+		n2 := copy(p[n:], data[relo:])
+		n += n2
+		offset += uint64(n2)
+	}
+
+	return n, nil
+}
+
 func offset2Key(x uint64) []byte {
-	y := [8]byte{}
-	binary.BigEndian.PutUint64(y[:], x)
-	return y[:]
+	keyBuf := [8]byte{}
+	binary.BigEndian.PutUint64(keyBuf[:], x)
+	return keyBuf[:]
 }
 
 func key2Offset(x []byte) uint64 {

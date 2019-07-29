@@ -43,9 +43,9 @@ func newDir(ctx context.Context, parent Object, name string) (*Dir, error) {
 	return dir, nil
 }
 
-func (d *Dir) Lookup(ctx context.Context, p Path) (Object, error) {
+func (d *Dir) Find(ctx context.Context, p Path, objs []Object) ([]Object, error) {
 	if len(p) == 0 {
-		return d, nil
+		return append(objs, d), nil
 	}
 	ent, err := d.Get(ctx, p[0])
 	if err != nil {
@@ -58,7 +58,18 @@ func (d *Dir) Lookup(ctx context.Context, p Path) (Object, error) {
 	if err != nil {
 		return nil, err
 	}
-	return o.Lookup(ctx, p[1:])
+	return o.Find(ctx, p[1:], objs)
+}
+
+func (d *Dir) Lookup(ctx context.Context, p Path) (Object, error) {
+	objs, err := d.Find(ctx, p, []Object{})
+	if err != nil {
+		return nil, err
+	}
+	if len(objs) < 1 {
+		return nil, nil
+	}
+	return objs[len(objs)-1], nil
 }
 
 func (d *Dir) Walk(ctx context.Context, f func(Object) bool) (bool, error) {
@@ -204,12 +215,12 @@ func (d *Dir) apply(ctx context.Context, fn DirMutator) error {
 	}
 
 	err := put(ctx, func(cur *models.Object) (*models.Object, error) {
-		curDir := d.m
-		if cur.Dir != nil {
-			curDir = *cur.Dir
+		var curDir *models.Dir
+		if cur != nil && cur.Dir != nil {
+			curDir = cur.Dir
 		}
 		var err error
-		newDir, err = fn(ctx, &curDir)
+		newDir, err = fn(ctx, curDir)
 		if err != nil {
 			newDir = nil
 			return nil, err

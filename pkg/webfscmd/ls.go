@@ -3,6 +3,7 @@ package webfscmd
 import (
 	"fmt"
 
+	"github.com/brendoncarroll/webfs/pkg/webfs"
 	"github.com/spf13/cobra"
 )
 
@@ -29,7 +30,18 @@ var lsCmd = &cobra.Command{
 		}
 		for _, e := range entries {
 			fmt.Print(" ")
-			fmt.Println(e.Name, e.Object)
+			oStr := ""
+			if v, ok := e.Object.(*webfs.Volume); ok {
+				o, err := v.Lookup(ctx, nil)
+				if err != nil {
+					return err
+				}
+				oStr = fmt.Sprint(v, " -> ", o)
+			} else {
+				oStr = fmt.Sprint(e.Object)
+			}
+
+			fmt.Printf("%-20s %10dB %-30s\n", e.Name, e.Object.Size(), oStr)
 		}
 		return nil
 	},

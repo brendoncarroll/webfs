@@ -3,6 +3,9 @@ package webref
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log"
+	mrand "math/rand"
 
 	"github.com/brendoncarroll/webfs/pkg/stores"
 )
@@ -27,21 +30,25 @@ func PostRepPack(ctx context.Context, store stores.WriteOnce, data []byte, o Opt
 			refs = append(refs, ref)
 		}
 	}
+
 	if len(refs) > 1 {
-		// mirror
-		panic("not done")
+		return &RepPackRef{
+			Mirror: &Mirror{
+				Replicas: refs,
+			},
+		}, nil
 	}
 
 	ref := refs[0]
 	return &ref, nil
 }
 
-func (r *RepPackRef) Deref(ctx context.Context, s stores.Read) ([]byte, error) {
+func GetRepPack(ctx context.Context, s stores.Read, r RepPackRef) ([]byte, error) {
 	switch {
 	case r.Single != nil:
-		return r.Single.Deref(ctx, s)
+		return GetCrypto(ctx, s, *r.Single)
 	case r.Mirror != nil:
-		return r.Mirror.Deref(ctx, s)
+		return GetMirror(ctx, s, *r.Mirror)
 	default:
 		return nil, errors.New("invalid ref")
 	}
@@ -60,34 +67,22 @@ type Mirror struct {
 	Replicas []RepPackRef `json:"replicas"`
 }
 
-// func MirrorRef(ctx context.Context, s l1.WriteOnce, data []byte) (*MirrorRef, error) {
-// 	totalReplicas := 0
-// 	for _, n := range ws.Replicas {
-// 		totalReplicas += n
-// 	}
-// 	replicas := make([]*Ref, n)
-// 	return nil, &MirrorRef{
-// 		replicas: replicas,
-// 	}
-// }
+func GetMirror(ctx context.Context, s stores.Read, m Mirror) ([]byte, error) {
+	l := len(m.Replicas)
+	count := 0
+	i := mrand.Int() % l
+	errs := []error{}
+	for count < l {
+		ref := m.Replicas[i]
+		data, err := GetRepPack(ctx, s, ref)
+		if err == nil {
+			return data, nil
+		}
+		errs = append(errs, err)
+		log.Println(err)
 
-func (m *Mirror) Deref(ctx context.Context, s stores.Read) ([]byte, error) {
-	// 	l := len(m.Replicas)
-	// 	count := 0
-	// 	i := rand.Int() % l
-	// 	errs := []error{}
-	// 	for count < l {
-	// 		ref := m.Replicas[i]
-	// 		data, err := ref.Deref(ctx, context.Context)
-	// 		if err == nil {
-	// 			return data, nil
-	// 		}
-	// 		errs = append(errs, err)
-	// 		log.Println(err)
-
-	// 		i = (i + 1) % l
-	// 		count++
-	// 	}
-	// 	return nil, fmt.Errorf("Errors from all replicas")
-	return nil, nil
+		i = (i + 1) % l
+		count++
+	}
+	return nil, fmt.Errorf("Errors from all replicas")
 }

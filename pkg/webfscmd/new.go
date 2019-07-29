@@ -10,11 +10,16 @@ import (
 const superblockPath = "./superblock.json"
 
 func init() {
+	newCmd.AddCommand(newFS)
 	rootCmd.AddCommand(newCmd)
 }
 
 var newCmd = &cobra.Command{
 	Use: "new",
+}
+
+var newFS = &cobra.Command{
+	Use: "fs",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		_, err := webfs.NewSuperblock(superblockPath)
 		if err != nil {

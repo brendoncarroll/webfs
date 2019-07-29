@@ -41,7 +41,7 @@ func PostCrypto(ctx context.Context, s stores.WriteOnce, prefix string, data []b
 	}, nil
 }
 
-func (r *CryptoRef) Deref(ctx context.Context, store stores.Read) ([]byte, error) {
+func GetCrypto(ctx context.Context, store stores.Read, r CryptoRef) ([]byte, error) {
 	payload, err := store.Get(ctx, r.URL)
 	if err != nil {
 		return nil, err
@@ -49,7 +49,6 @@ func (r *CryptoRef) Deref(ctx context.Context, store stores.Read) ([]byte, error
 	if err := crypt(r.EncAlgo, r.Secret, payload, payload); err != nil {
 		return nil, err
 	}
-
 	return payload[:r.Length], nil
 }
 

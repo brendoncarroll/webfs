@@ -10,6 +10,7 @@ require (
 	github.com/ncw/rclone v1.48.0
 	github.com/spf13/afero v1.2.2
 	github.com/spf13/cobra v0.0.5
+	github.com/spf13/pflag v1.0.3
 	github.com/stretchr/testify v1.3.0
 	golang.org/x/crypto v0.0.0-20190618222545-ea8f1a30c443
 )

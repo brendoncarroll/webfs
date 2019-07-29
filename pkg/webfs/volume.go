@@ -8,7 +8,6 @@ import (
 
 	"github.com/brendoncarroll/webfs/pkg/cells"
 	"github.com/brendoncarroll/webfs/pkg/webfs/models"
-	"github.com/brendoncarroll/webfs/pkg/wrds"
 )
 
 var ErrCASFailed = errors.New("CAS failed. Should Retry")
@@ -21,15 +20,36 @@ type ObjectMutator func(*models.Object) (*models.Object, error)
 
 type Volume struct {
 	cell Cell
-	opts Options
+	opts *Options
 
 	baseObject
+}
+
+func (v *Volume) Find(ctx context.Context, p Path, objs []Object) ([]Object, error) {
+	if len(p) == 0 {
+		objs = append(objs, v)
+	}
+
+	o, err := v.getObject(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if o != nil {
+		objs, err = o.Find(ctx, p, objs)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return objs, nil
 }
 
 func (v *Volume) Lookup(ctx context.Context, p Path) (Object, error) {
 	o, err := v.getObject(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if o == nil {
+		return nil, nil
 	}
 	return o.Lookup(ctx, p)
 }
@@ -44,7 +64,7 @@ func (v *Volume) Walk(ctx context.Context, f func(Object) bool) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	data, err := v.getStore().Get(ctx, cc.ObjectRef)
+	data, err := v.getStore().Get(ctx, *cc.ObjectRef)
 	if err != nil {
 		return false, err
 	}
@@ -61,21 +81,12 @@ func (v *Volume) Get(ctx context.Context) (*models.Volume, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(data) == 0 {
-		log.Println("initializing volume")
-		o := &models.Object{
-			Dir: &models.Dir{Tree: wrds.NewTree()},
-		}
-		data, _ := json.Marshal(o)
-		ref, err := v.getStore().Post(ctx, data)
-		if err != nil {
-			return nil, err
-		}
+	if len(data) < 1 {
 		return &models.Volume{
-			ObjectRef: *ref,
-			Options:   v.getOptions(),
+			Options: DefaultOptions(),
 		}, nil
 	}
+
 	m := models.Volume{}
 	if err := m.Unmarshal(data); err != nil {
 		return nil, err
@@ -88,7 +99,10 @@ func (v *Volume) getObject(ctx context.Context) (Object, error) {
 	if err != nil {
 		return nil, err
 	}
-	data, err := v.getStore().Get(ctx, m.ObjectRef)
+	if m.ObjectRef == nil {
+		return nil, nil
+	}
+	data, err := v.getStore().Get(ctx, *m.ObjectRef)
 	if err != nil {
 		return nil, err
 	}
@@ -97,33 +111,31 @@ func (v *Volume) getObject(ctx context.Context) (Object, error) {
 
 func (v *Volume) put(ctx context.Context, fn ObjectMutator) error {
 	return v.apply(ctx, func(cur models.Volume) (*models.Volume, error) {
-		data, err := v.getStore().Get(ctx, cur.ObjectRef)
-		if err != nil {
-			return nil, err
-		}
-		o := &models.Object{}
-		if len(data) > 0 {
+		var o *models.Object
+		if cur.ObjectRef != nil {
+			data, err := v.getStore().Get(ctx, *cur.ObjectRef)
+			if err != nil {
+				return nil, err
+			}
+			o = &models.Object{}
 			if err := json.Unmarshal(data, o); err != nil {
 				return nil, err
 			}
 		}
 
-		var o2 *models.Object
-		if !(o.File == nil && o.Cell == nil && o.Dir == nil) {
-			o2, err = fn(o)
-			if err != nil {
-				return nil, err
-			}
+		o2, err := fn(o)
+		if err != nil {
+			return nil, err
 		}
 
-		data, _ = json.Marshal(o2)
+		data, _ := json.Marshal(o2)
 		ref, err := v.getStore().Post(ctx, data)
 		if err != nil {
 			return nil, err
 		}
 
 		next := models.Volume{
-			ObjectRef: *ref,
+			ObjectRef: ref,
 			Options:   cur.Options,
 		}
 		return &next, nil
@@ -140,20 +152,23 @@ func (v *Volume) apply(ctx context.Context, f VolumeMutator) error {
 	const maxRetries = 10
 	success := false
 	for i := 0; !success && i < maxRetries; i++ {
-		current, err := wcell.Load(ctx)
+		cur, err := wcell.Load(ctx)
 		if err != nil {
 			return err
 		}
-		currentC := models.Volume{}
-		if err := currentC.Unmarshal(current); err != nil {
-			return err
+		curV := models.Volume{}
+		if len(cur) > 0 {
+			if err := curV.Unmarshal(cur); err != nil {
+				return err
+			}
 		}
-		nextC, err := f(currentC)
+
+		nextV, err := f(curV)
 		if err != nil {
 			return err
 		}
-		next := nextC.Marshal()
-		success, err = wcell.CAS(ctx, current, next)
+		next := nextV.Marshal()
+		success, err = wcell.CAS(ctx, cur, next)
 		if err != nil {
 			return err
 		}
@@ -178,7 +193,7 @@ func (v *Volume) RefIter(ctx context.Context, f func(Ref) bool) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	cont := f(cc.ObjectRef)
+	cont := f(*cc.ObjectRef)
 	return cont, nil
 }
 
@@ -196,8 +211,8 @@ func (v *Volume) getStore() ReadWriteOnce {
 }
 
 func (v *Volume) getOptions() Options {
-	if v.parent == nil {
-		return DefaultOptions()
+	if v.opts != nil {
+		return *v.opts
 	}
-	return v.parent.getOptions()
+	return DefaultOptions()
 }

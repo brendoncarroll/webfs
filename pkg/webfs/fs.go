@@ -226,7 +226,7 @@ func (wfs *WebFS) NewVolume(ctx context.Context, p string, spec models.CellSpec)
 	if cell == nil {
 		return errors.New("could not create cell")
 	}
-	_, err := cell.Load(ctx)
+	_, err := cell.Get(ctx)
 	if err != nil {
 		return errors.New("could not access cell")
 	}

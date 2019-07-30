@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log"
 
 	"github.com/brendoncarroll/webfs/pkg/cells"
 	"github.com/brendoncarroll/webfs/pkg/webfs/models"
@@ -13,7 +12,6 @@ import (
 var ErrCASFailed = errors.New("CAS failed. Should Retry")
 
 type Cell = cells.Cell
-type CASCell = cells.CASCell
 
 type VolumeMutator func(models.Volume) (*models.Volume, error)
 type ObjectMutator func(*models.Object) (*models.Object, error)
@@ -77,7 +75,7 @@ func (v *Volume) Walk(ctx context.Context, f func(Object) bool) (bool, error) {
 }
 
 func (v *Volume) Get(ctx context.Context) (*models.Volume, error) {
-	data, err := v.cell.Load(ctx)
+	data, err := v.cell.Get(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -143,16 +141,10 @@ func (v *Volume) put(ctx context.Context, fn ObjectMutator) error {
 }
 
 func (v *Volume) apply(ctx context.Context, f VolumeMutator) error {
-	wcell, ok := v.cell.(CASCell)
-	if !ok {
-		log.Println(v.cell)
-		return errors.New("cell is not writeable")
-	}
-
 	const maxRetries = 10
 	success := false
 	for i := 0; !success && i < maxRetries; i++ {
-		cur, err := wcell.Load(ctx)
+		cur, err := v.cell.Get(ctx)
 		if err != nil {
 			return err
 		}
@@ -168,7 +160,7 @@ func (v *Volume) apply(ctx context.Context, f VolumeMutator) error {
 			return err
 		}
 		next := nextV.Marshal()
-		success, err = wcell.CAS(ctx, cur, next)
+		success, err = v.cell.CAS(ctx, cur, next)
 		if err != nil {
 			return err
 		}

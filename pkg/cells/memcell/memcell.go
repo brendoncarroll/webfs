@@ -45,7 +45,7 @@ func (c *Cell) CAS(ctx context.Context, cur, next []byte) (bool, error) {
 	return false, nil
 }
 
-func (c *Cell) Load(ctx context.Context) ([]byte, error) {
+func (c *Cell) Get(ctx context.Context) ([]byte, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.x, nil

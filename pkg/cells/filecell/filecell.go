@@ -34,7 +34,7 @@ func (c *Cell) ID() string {
 	return "filecell-%s" + c.p
 }
 
-func (c *Cell) Load(ctx context.Context) ([]byte, error) {
+func (c *Cell) Get(ctx context.Context) ([]byte, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return ioutil.ReadFile(c.p)

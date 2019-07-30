@@ -11,8 +11,8 @@ import (
 )
 
 type RepPackRef struct {
-	Single *CryptoRef `json:"single"`
-	Mirror *Mirror    `json:"mirror"`
+	Single *CryptoRef `json:"single,omitempty"`
+	Mirror *Mirror    `json:"mirror,omitempty"`
 }
 
 func PostRepPack(ctx context.Context, store stores.WriteOnce, data []byte, o Options) (*RepPackRef, error) {

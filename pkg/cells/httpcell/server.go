@@ -2,11 +2,15 @@ package httpcell
 
 import (
 	"bytes"
-	"encoding/json"
+	"context"
+	"encoding/base64"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"sync"
+
+	"golang.org/x/crypto/sha3"
 )
 
 type Server struct {
@@ -20,8 +24,18 @@ func NewServer() *Server {
 	}
 }
 
-func (s *Server) ListenAndServe(addr string) error {
-	return http.ListenAndServe(addr, s)
+func (s *Server) Serve(ctx context.Context, addr string) error {
+	l, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	go func() {
+		<-ctx.Done()
+		if err := l.Close(); err != nil {
+			log.Println(err)
+		}
+	}()
+	return http.Serve(l, s)
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -35,9 +49,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodPost:
-		s.mu.Lock()
-		s.cs[p] = []byte{}
-		s.mu.Unlock()
+		s.newCell(p)
 		w.WriteHeader(http.StatusOK)
 
 	case http.MethodGet:
@@ -49,32 +61,32 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case http.MethodPut:
-		reqBody, err := ioutil.ReadAll(r.Body)
+		log.Println("PUT", p)
+		proposed, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			log.Println(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		believedHashb64 := r.Header.Get(currentHeader)
+		believedHash, err := base64.URLEncoding.DecodeString(believedHashb64)
 		if err != nil {
 			log.Println(err)
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 
-		casReq := CASReq{}
-		if err := json.Unmarshal(reqBody, &casReq); err != nil {
-			log.Println(err)
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-
 		s.mu.Lock()
-		casRes := CASRes{}
-		if bytes.Compare(c, casReq.Current) == 0 {
-			casRes.Changed = true
-			s.cs[p] = casReq.Next
+		data := s.cs[p]
+		actualHash := sha3.Sum256(data)
+		if bytes.Compare(actualHash[:], believedHash) == 0 {
+			s.cs[p] = proposed
+			data = proposed
 		}
-		casRes.Current = s.cs[p]
 		s.mu.Unlock()
 
-		resBody, _ := json.Marshal(casRes)
 		w.WriteHeader(http.StatusOK)
-		_, err = w.Write(resBody)
+		_, err = w.Write(data)
 		if err != nil {
 			log.Println(err)
 		}
@@ -82,4 +94,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.WriteHeader(http.StatusBadRequest)
 	}
+}
+
+func (s *Server) newCell(p string) {
+	s.mu.Lock()
+	s.cs[p] = []byte{}
+	s.mu.Unlock()
 }

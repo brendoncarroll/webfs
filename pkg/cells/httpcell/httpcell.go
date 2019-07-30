@@ -3,12 +3,13 @@ package httpcell
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/base64"
 	"io/ioutil"
 	"log"
 	"net/http"
 
 	"github.com/brendoncarroll/webfs/pkg/cells"
+	"golang.org/x/crypto/sha3"
 )
 
 func init() {
@@ -17,7 +18,10 @@ func init() {
 	})
 }
 
-const authHeader = "Authorization"
+const (
+	authHeader    = "Authorization"
+	currentHeader = "X-Current"
+)
 
 type Spec struct {
 	URL        string
@@ -26,13 +30,13 @@ type Spec struct {
 
 type HttpCell struct {
 	Spec
-	hc http.Client
+	hc *http.Client
 }
 
 func New(spec Spec) *HttpCell {
 	return &HttpCell{
 		Spec: spec,
-		hc:   http.Client{},
+		hc:   http.DefaultClient,
 	}
 }
 
@@ -40,7 +44,7 @@ func (c *HttpCell) ID() string {
 	return "httpcell-" + c.URL
 }
 
-func (c *HttpCell) Load(ctx context.Context) ([]byte, error) {
+func (c *HttpCell) Get(ctx context.Context) ([]byte, error) {
 	req, err := http.NewRequest(http.MethodGet, c.Spec.URL, nil)
 	if err != nil {
 		panic(err)
@@ -63,17 +67,14 @@ func (c *HttpCell) Load(ctx context.Context) ([]byte, error) {
 }
 
 func (c *HttpCell) CAS(ctx context.Context, cur, next []byte) (bool, error) {
-	creq := CASReq{
-		Current: cur,
-		Next:    next,
-	}
-	reqBody, _ := json.Marshal(creq)
-
-	req, err := http.NewRequest(http.MethodPut, c.URL, bytes.NewBuffer(reqBody))
+	curHash := sha3.Sum256(cur)
+	curHashb64 := base64.URLEncoding.EncodeToString(curHash[:])
+	req, err := http.NewRequest(http.MethodPut, c.URL, bytes.NewBuffer(next))
 	if err != nil {
 		return false, err
 	}
 	req.Header.Add(authHeader, c.AuthHeader)
+	req.Header.Add(currentHeader, curHashb64)
 	resp, err := c.hc.Do(req)
 	if err != nil {
 		return false, err
@@ -83,5 +84,10 @@ func (c *HttpCell) CAS(ctx context.Context, cur, next []byte) (bool, error) {
 			log.Println(err)
 		}
 	}()
-	return false, nil
+	data, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return false, err
+	}
+	success := bytes.Compare(next, data) == 0
+	return success, nil
 }

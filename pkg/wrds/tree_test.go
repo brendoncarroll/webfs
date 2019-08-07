@@ -14,7 +14,7 @@ var ctx = context.TODO()
 
 func TestIndexOf(t *testing.T) {
 	tree := Tree{
-		Entries: []TreeEntry{
+		Entries: []*TreeEntry{
 			{Key: []byte("bbb")},
 			{Key: []byte("ccc")},
 			{Key: []byte("ddd")},
@@ -35,7 +35,7 @@ func TestPutGet(t *testing.T) {
 	var err error
 	for i := 0; i < N; i++ {
 		key := []byte(fmt.Sprintf("key%03d", i))
-		ref := webref.Ref{}
+		ref := &webref.Ref{}
 		tree, err = tree.Put(ctx, s, key, ref)
 		require.Nil(t, err)
 	}

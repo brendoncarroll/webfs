@@ -53,7 +53,7 @@ func (f *File) SetData(ctx context.Context, r io.Reader) error {
 			return err
 		}
 		data := buf[:n]
-		m, err = fileWriteAt(ctx, f.store, *m, m.Size, data)
+		m, err = fileAppend(ctx, f.store, *m, data)
 		if err != nil {
 			return err
 		}
@@ -123,15 +123,22 @@ func (f *File) apply(ctx context.Context, fn FileMutator) error {
 	case *Dir:
 		err = x.put(ctx, f.nameInParent, func(cur *models.Object) (*models.Object, error) {
 			curFile := f.m
-			if cur != nil && cur.File != nil {
-				curFile = *cur.File
+			if cur != nil {
+				of, ok := cur.Value.(*models.Object_File)
+				if ok {
+					curFile = *of.File
+				}
 			}
 
 			newFile, err = fn(curFile)
 			if err != nil {
 				return nil, err
 			}
-			return &models.Object{File: newFile}, nil
+			return &models.Object{
+				Value: &models.Object_File{
+					File: newFile,
+				},
+			}, nil
 		})
 	default:
 		panic("invalid parent of file")
@@ -149,7 +156,7 @@ func (f *File) getStore() ReadWriteOnce {
 	return f.store
 }
 
-func fileWriteAt(ctx context.Context, s ReadWriteOnce, x models.File, offset uint64, p []byte) (*models.File, error) {
+func fileAppend(ctx context.Context, s ReadWriteOnce, x models.File, p []byte) (*models.File, error) {
 	var err error
 	y := &models.File{}
 
@@ -158,18 +165,13 @@ func fileWriteAt(ctx context.Context, s ReadWriteOnce, x models.File, offset uin
 		return nil, err
 	}
 
+	offset := x.Size
 	key := offset2Key(offset)
-	y.Tree, err = x.Tree.Put(ctx, s, key[:], *ref)
+	y.Tree, err = x.Tree.Put(ctx, s, key[:], ref)
 	if err != nil {
 		return nil, err
 	}
-
-	if offset+uint64(len(p)) > x.Size {
-		y.Size = uint64(len(p)) + offset
-	} else {
-		y.Size = x.Size
-	}
-
+	y.Size = x.Size + uint64(len(p))
 	return y, nil
 }
 
@@ -189,7 +191,7 @@ func fileReadAt(ctx context.Context, s ReadWriteOnce, x models.File, offset uint
 			return 0, errors.New("got wrong entry from tree")
 		}
 		relo := offset - o
-		data, err := s.Get(ctx, ent.Ref)
+		data, err := s.Get(ctx, *ent.Ref)
 		if err != nil {
 			return n, err
 		}
@@ -230,7 +232,7 @@ func refIterTree(ctx context.Context, store Read, t *wrds.Tree, f func(Ref) bool
 		if entry == nil {
 			return false, nil
 		}
-		cont = f(entry.Ref)
+		cont = f(*entry.Ref)
 	}
 	return cont, nil
 }

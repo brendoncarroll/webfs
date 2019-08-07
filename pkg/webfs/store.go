@@ -18,7 +18,7 @@ type Store struct {
 }
 
 func (s *Store) Post(ctx context.Context, data []byte) (*Ref, error) {
-	return webref.Post(ctx, s.ms, data, s.opts)
+	return webref.Post(ctx, s.ms, s.opts, data)
 }
 
 func (s *Store) Get(ctx context.Context, ref Ref) ([]byte, error) {
@@ -31,4 +31,8 @@ func (s *Store) MaxBlobSize() int {
 
 func (s *Store) Check(ctx context.Context, ref Ref) (bool, error) {
 	panic("not implemented")
+}
+
+func (s *Store) Options() *webref.Options {
+	return &s.opts
 }

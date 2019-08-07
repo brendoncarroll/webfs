@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package webref;
+
+option go_package = "github.com/brendoncarroll/webfs/pkg/webref";
+
+enum EncAlgo {
+    UNKNOWN = 0;
+    AES256CTR = 1;
+    CHACHA20 = 2;
+}
+
+message CryptoRef {
+    string url = 1;
+    EncAlgo enc_algo = 2;
+    bytes dek = 3;
+    int32 length = 4;
+}
+
+message Slice {
+    CryptoRef ref = 1;
+    int32 offset = 2;
+    int32 length = 3;
+}
+
+message Mirror {
+    repeated RepPackRef replicas = 1;
+}
+
+message RepPackRef {
+    oneof ref {
+        CryptoRef single = 1;
+        Mirror mirror = 2;
+        Slice slice = 3;
+    }
+}
+
+message Ref {
+    RepPackRef ref = 1;
+    map<string, string> attrs = 2;
+}
+
+message Options {
+    EncAlgo enc_algo = 1;
+    bytes secret_seed = 2;
+    bool obfuscate_length = 3;
+    map<string, int32> replicas = 4;
+    map<string, string> attrs = 5;
+}

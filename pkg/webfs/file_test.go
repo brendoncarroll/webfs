@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestFileWriteAt(t *testing.T) {
+func TestFileAppend(t *testing.T) {
 	ctx := context.TODO()
 	ms := webref.NewMemStore()
 	f := &models.File{Tree: wrds.NewTree()}
@@ -28,7 +28,7 @@ func TestFileWriteAt(t *testing.T) {
 	)
 	for _, s := range testData {
 		d := []byte(s)
-		f, err = fileWriteAt(ctx, ms, *f, uint64(n), d)
+		f, err = fileAppend(ctx, ms, *f, d)
 		n += len(d)
 		require.Nil(t, err)
 	}

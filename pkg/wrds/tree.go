@@ -3,7 +3,6 @@ package wrds
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"sort"
 
@@ -18,22 +17,12 @@ type ReadWriteOnce = webref.ReadWriteOnce
 // a guess. a tree needs to be able to store at least 2 entries.
 const minTreeSize = 1024
 
-type TreeEntry struct {
-	Key []byte `json:"key"`
-	Ref Ref    `json:"ref"`
-}
-
-type Tree struct {
-	Level   uint        `json:"level"`
-	Entries []TreeEntry `json:"entries"`
-}
-
 func NewTree() *Tree {
 	return &Tree{Level: 1}
 }
 
-func (t *Tree) Put(ctx context.Context, s ReadWriteOnce, key []byte, ref Ref) (*Tree, error) {
-	ent := TreeEntry{Key: key, Ref: ref}
+func (t *Tree) Put(ctx context.Context, s ReadWriteOnce, key []byte, ref *Ref) (*Tree, error) {
+	ent := &TreeEntry{Key: key, Ref: ref}
 	newTree, err := t.put(ctx, s, ent)
 	if err != nil {
 		return nil, err
@@ -48,21 +37,20 @@ func (t *Tree) Split(ctx context.Context, s ReadWriteOnce) (*Tree, error) {
 	newTree := Tree{Level: t.Level + 1}
 
 	for _, st := range []Tree{low, high} {
-		data := st.Marshal()
-		ref, err := s.Post(ctx, data)
+		ref, err := webref.Store(ctx, s, st)
 		if err != nil {
 			return nil, err
 		}
-		ent := TreeEntry{Key: st.MinKey(), Ref: *ref}
+		ent := &TreeEntry{Key: st.MinKey(), Ref: ref}
 		newTree.Entries = append(newTree.Entries, ent)
 	}
 	return &newTree, nil
 }
 
-func (t *Tree) put(ctx context.Context, s ReadWriteOnce, ent TreeEntry) (*Tree, error) {
+func (t *Tree) put(ctx context.Context, s ReadWriteOnce, ent *TreeEntry) (*Tree, error) {
 	i := t.indexPut(ent.Key)
 
-	entries := []TreeEntry{}
+	entries := []*TreeEntry{}
 	entries = append(entries, t.Entries[:i]...)
 
 	if t.Level > 1 && i < len(t.Entries) {
@@ -72,33 +60,29 @@ func (t *Tree) put(ctx context.Context, s ReadWriteOnce, ent TreeEntry) (*Tree, 
 	// find subtree and recurse
 	if t.Level > 1 {
 		subTree := &Tree{}
-		stData, err := s.Get(ctx, t.Entries[i].Ref)
+		err := webref.Load(ctx, s, *t.Entries[i].Ref, subTree)
 		if err != nil {
 			return nil, err
 		}
-		if err := subTree.Unmarshal(stData); err != nil {
-			return nil, err
-		}
+
 		subTree, err = subTree.put(ctx, s, ent)
 		if err != nil {
 			return nil, err
 		}
 
 		subTrees := []Tree{*subTree}
-		data := subTree.Marshal()
 		// check if we need to split
-		if len(data) > s.MaxBlobSize() {
+		if webref.SizeOf(s, subTree) > s.MaxBlobSize() {
 			low, high := subTree.split()
 			subTrees = []Tree{low, high}
 		}
 		// we either have one or 2 subtrees, post them all and convert to entries
 		for _, st := range subTrees {
-			data := st.Marshal()
-			ref, err := s.Post(ctx, data)
+			ref, err := webref.Store(ctx, s, st)
 			if err != nil {
 				return nil, err
 			}
-			stEnt := TreeEntry{Key: st.MinKey(), Ref: *ref}
+			stEnt := &TreeEntry{Key: st.MinKey(), Ref: ref}
 			entries = append(entries, stEnt)
 		}
 	} else {
@@ -125,7 +109,7 @@ func (t *Tree) indexPut(key []byte) int {
 func (t *Tree) indexGet(key []byte) int {
 	var (
 		i = -1
-		e TreeEntry
+		e *TreeEntry
 	)
 	for i, e = range t.Entries {
 		cmp := bytes.Compare(e.Key, key)
@@ -148,18 +132,15 @@ func (t *Tree) MaxLteq(ctx context.Context, s webref.Read, key []byte) (*TreeEnt
 	}
 	switch {
 	case t.Level > 1:
-		subtreeData, err := s.Get(ctx, t.Entries[i].Ref)
+		subtree := &Tree{}
+		err := webref.Load(ctx, s, *t.Entries[i].Ref, subtree)
 		if err != nil {
-			return nil, err
-		}
-		subtree := Tree{}
-		if err := subtree.Unmarshal(subtreeData); err != nil {
 			return nil, err
 		}
 		return subtree.MaxLteq(ctx, s, key)
 	case t.Level == 1:
 		entry := t.Entries[i]
-		return &entry, nil
+		return entry, nil
 	default:
 		return nil, errors.New("invalid tree")
 	}
@@ -180,7 +161,7 @@ func (t *Tree) MinGt(ctx context.Context, s Read, key []byte) (*TreeEntry, error
 		return st.MinGt(ctx, s, key)
 	default:
 		ent := t.Entries[i]
-		return &ent, nil
+		return ent, nil
 	}
 
 	return nil, nil
@@ -202,7 +183,7 @@ func (t *Tree) Get(ctx context.Context, s Read, key []byte) (*TreeEntry, error) 
 	case t.Level == 1:
 		ent := t.Entries[i]
 		if bytes.Compare(key, ent.Key) == 0 {
-			return &ent, nil
+			return ent, nil
 		}
 		return nil, nil
 	default:
@@ -223,7 +204,7 @@ func (t *Tree) delete(ctx context.Context, s ReadWriteOnce, key []byte) (*Tree, 
 
 	switch {
 	case t.Level == 1:
-		newEntries := []TreeEntry{}
+		newEntries := []*TreeEntry{}
 		newEntries = append(newEntries, t.Entries[:i]...)
 		newEntries = append(newEntries, t.Entries[i+1:]...)
 		if len(newEntries) == 0 {
@@ -241,15 +222,14 @@ func (t *Tree) delete(ctx context.Context, s ReadWriteOnce, key []byte) (*Tree, 
 			return nil, err
 		}
 
-		newEntries := []TreeEntry{}
+		newEntries := []*TreeEntry{}
 		newEntries = append(newEntries, t.Entries[:i]...)
 		if newSt != nil {
-			data := newSt.Marshal()
-			ref, err := s.Post(ctx, data)
+			ref, err := webref.Store(ctx, s, newSt)
 			if err != nil {
 				return nil, err
 			}
-			newEnt := TreeEntry{Key: t.Entries[i].Key, Ref: *ref}
+			newEnt := &TreeEntry{Key: t.Entries[i].Key, Ref: ref}
 			newEntries = append(newEntries, newEnt)
 		}
 		newEntries = append(newEntries, t.Entries[i+1:]...)
@@ -275,30 +255,15 @@ func (t *Tree) MaxKey(ctx context.Context, s Read) ([]byte, error) {
 	case t.Level == 1:
 		return t.Entries[l-1].Key, nil
 	case t.Level > 1:
-		subTree := Tree{}
-		data, err := s.Get(ctx, t.Entries[l-1].Ref)
+		subTree := &Tree{}
+		err := webref.Load(ctx, s, *t.Entries[l-1].Ref, subTree)
 		if err != nil {
-			return nil, err
-		}
-		if err := subTree.Unmarshal(data); err != nil {
 			return nil, err
 		}
 		return subTree.MaxKey(ctx, s)
 	default:
 		return nil, errors.New("invalid tree: level < 1")
 	}
-}
-
-func (t *Tree) Unmarshal(data []byte) error {
-	return json.Unmarshal(data, t)
-}
-
-func (t *Tree) Marshal() []byte {
-	data, err := json.Marshal(t)
-	if err != nil {
-		panic(err)
-	}
-	return data
 }
 
 func merge(a, b Tree) Tree {
@@ -332,13 +297,11 @@ func (t *Tree) split() (low, high Tree) {
 
 func (t *Tree) getSubtree(ctx context.Context, s Read, i int) (*Tree, error) {
 	ent := t.Entries[i]
-	data, err := s.Get(ctx, ent.Ref)
+	subtree := &Tree{}
+
+	err := webref.Load(ctx, s, *ent.Ref, subtree)
 	if err != nil {
 		return nil, err
 	}
-	subtree := Tree{}
-	if err := subtree.Unmarshal(data); err != nil {
-		return nil, err
-	}
-	return &subtree, nil
+	return subtree, nil
 }

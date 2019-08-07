@@ -14,13 +14,6 @@ import (
 	"github.com/brendoncarroll/webfs/pkg/stores"
 )
 
-type CryptoRef struct {
-	URL     string `json:"url"`
-	EncAlgo string `json:"enc-algo"`
-	Secret  []byte `json:"secret"`
-	Length  uint64 `json:"length"`
-}
-
 func PostCrypto(ctx context.Context, s stores.WriteOnce, prefix string, data []byte, o Options) (*CryptoRef, error) {
 	secret := generateSecret(data, o.SecretSeed)
 
@@ -35,26 +28,26 @@ func PostCrypto(ctx context.Context, s stores.WriteOnce, prefix string, data []b
 	}
 	return &CryptoRef{
 		EncAlgo: o.EncAlgo,
-		Secret:  secret,
-		URL:     string(key),
-		Length:  uint64(len(data)),
+		Dek:     secret,
+		Url:     string(key),
+		Length:  int32(len(data)),
 	}, nil
 }
 
-func GetCrypto(ctx context.Context, store stores.Read, r CryptoRef) ([]byte, error) {
-	payload, err := store.Get(ctx, r.URL)
+func GetCrypto(ctx context.Context, store stores.Read, r *CryptoRef) ([]byte, error) {
+	payload, err := store.Get(ctx, r.Url)
 	if err != nil {
 		return nil, err
 	}
-	if err := crypt(r.EncAlgo, r.Secret, payload, payload); err != nil {
+	if err := crypt(r.EncAlgo, r.Dek, payload, payload); err != nil {
 		return nil, err
 	}
 	return payload[:r.Length], nil
 }
 
-func crypt(algo string, secret, in, out []byte) error {
+func crypt(algo EncAlgo, secret, in, out []byte) error {
 	switch algo {
-	case "aes-256-ctr":
+	case EncAlgo_AES256CTR:
 		iv := [16]byte{} // 0
 		blockCipher, err := aes.NewCipher(secret)
 		if err != nil {
@@ -62,7 +55,7 @@ func crypt(algo string, secret, in, out []byte) error {
 		}
 		streamCipher := cipher.NewCTR(blockCipher, iv[:])
 		streamCipher.XORKeyStream(out, in)
-	case "chacha20":
+	case EncAlgo_CHACHA20:
 		nonce := [chacha20.NonceSize]byte{} // 0
 		streamCipher, err := chacha20.NewCipher(secret, nonce[:])
 		if err != nil {

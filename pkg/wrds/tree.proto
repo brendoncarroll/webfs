@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package wrds;
+
+option go_package = "github.com/brendoncarroll/webfs/pkg/wrds";
+
+import "ref.proto";
+
+message Tree {
+    uint32 level = 1;
+    repeated TreeEntry entries = 2;
+}
+
+message TreeEntry {
+    bytes key = 1;
+    webref.Ref ref = 2;
+}
+

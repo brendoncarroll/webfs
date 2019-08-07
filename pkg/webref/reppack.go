@@ -10,22 +10,17 @@ import (
 	"github.com/brendoncarroll/webfs/pkg/stores"
 )
 
-type RepPackRef struct {
-	Single *CryptoRef `json:"single,omitempty"`
-	Mirror *Mirror    `json:"mirror,omitempty"`
-}
-
-func PostRepPack(ctx context.Context, store stores.WriteOnce, data []byte, o Options) (*RepPackRef, error) {
-	refs := []RepPackRef{}
+func PostRepPack(ctx context.Context, store stores.WriteOnce, o Options, data []byte) (*RepPackRef, error) {
+	refs := []*RepPackRef{}
 	for k, v := range o.Replicas {
-		for i := 0; i < v; i++ {
+		for i := 0; i < int(v); i++ {
 			prefix := k
-			l1ref, err := PostCrypto(ctx, store, prefix, data, o)
+			cref, err := PostCrypto(ctx, store, prefix, data, o)
 			if err != nil {
 				return nil, err
 			}
-			ref := RepPackRef{
-				Single: l1ref,
+			ref := &RepPackRef{
+				Ref: &RepPackRef_Single{Single: cref},
 			}
 			refs = append(refs, ref)
 		}
@@ -33,41 +28,49 @@ func PostRepPack(ctx context.Context, store stores.WriteOnce, data []byte, o Opt
 
 	if len(refs) > 1 {
 		return &RepPackRef{
-			Mirror: &Mirror{
-				Replicas: refs,
+			Ref: &RepPackRef_Mirror{
+				Mirror: &Mirror{
+					Replicas: refs,
+				},
 			},
 		}, nil
 	}
 
 	ref := refs[0]
-	return &ref, nil
+	return ref, nil
 }
 
-func GetRepPack(ctx context.Context, s stores.Read, r RepPackRef) ([]byte, error) {
-	switch {
-	case r.Single != nil:
-		return GetCrypto(ctx, s, *r.Single)
-	case r.Mirror != nil:
-		return GetMirror(ctx, s, *r.Mirror)
+func GetRepPack(ctx context.Context, s stores.Read, r *RepPackRef) ([]byte, error) {
+	switch x := r.Ref.(type) {
+	case *RepPackRef_Single:
+		return GetCrypto(ctx, s, x.Single)
+	case *RepPackRef_Mirror:
+		return GetMirror(ctx, s, x.Mirror)
+	case *RepPackRef_Slice:
+		panic("not implemented")
 	default:
 		return nil, errors.New("invalid ref")
 	}
 }
 
-func (r *Ref) GetURLs() []string {
-	switch {
-	case r.Single != nil:
-		return []string{r.Single.URL}
+func (r *RepPackRef) GetURLs() []string {
+	switch x := r.Ref.(type) {
+	case *RepPackRef_Single:
+		return []string{x.Single.Url}
+	case *RepPackRef_Mirror:
+		urls := []string{}
+		for _, ref := range x.Mirror.Replicas {
+			urls = append(urls, ref.GetURLs()...)
+		}
+		return urls
+	case *RepPackRef_Slice:
+		return []string{x.Slice.Ref.Url}
 	default:
 		return nil
 	}
 }
 
-type Mirror struct {
-	Replicas []RepPackRef `json:"replicas"`
-}
-
-func GetMirror(ctx context.Context, s stores.Read, m Mirror) ([]byte, error) {
+func GetMirror(ctx context.Context, s stores.Read, m *Mirror) ([]byte, error) {
 	l := len(m.Replicas)
 	count := 0
 	i := mrand.Int() % l

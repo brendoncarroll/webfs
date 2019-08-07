@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package webfs;
+option go_package = "models";
+
+import "tree.proto";
+import "ref.proto";
+
+message Object {
+    oneof Value {
+        File file = 1;
+        Dir dir = 2;
+        CellSpec cell = 3;
+    }
+}
+
+message File {
+    wrds.Tree tree = 1;
+    uint64 size = 2;
+}
+
+message Dir {
+    wrds.Tree tree = 1;
+}
+
+message DirEntry {
+    string name = 1;
+    Object object = 2;
+}
+
+message CellSpec {
+    string type = 1;
+    bytes config = 2;
+}
+
+// Volume Options
+message Options {
+    webref.Options data_opts = 1;
+    webref.Options metadata_opts = 2;
+}
+
+message Volume {
+    webref.Ref object_ref = 1;
+    Options options = 2;
+}

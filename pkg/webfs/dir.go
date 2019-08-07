@@ -2,11 +2,11 @@ package webfs
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 
 	"github.com/brendoncarroll/webfs/pkg/webfs/models"
+	"github.com/brendoncarroll/webfs/pkg/webref"
 	"github.com/brendoncarroll/webfs/pkg/wrds"
 )
 
@@ -90,16 +90,18 @@ func (d *Dir) Walk(ctx context.Context, f func(Object) bool) (bool, error) {
 		if ent == nil {
 			break
 		}
-		data, err := d.store.Get(ctx, ent.Ref)
-		if err != nil {
+
+		dirEnt := models.DirEntry{}
+		if err := webref.Load(ctx, d.store, *ent.Ref, &dirEnt); err != nil {
 			return false, err
 		}
+
 		name := string(ent.Key)
-		o, err := unmarshalObject(d, name, data)
+		o2, err := wrapObject(d, name, dirEnt.Object)
 		if err != nil {
 			return false, nil
 		}
-		cont = f(o)
+		cont = f(o2)
 	}
 	return cont, nil
 }
@@ -135,12 +137,9 @@ func (d *Dir) Entries(ctx context.Context) ([]DirEntry, error) {
 		if ent == nil {
 			break
 		}
-		data, err := d.store.Get(ctx, ent.Ref)
-		if err != nil {
-			return nil, err
-		}
-		dirEnt := models.DirEntry{}
-		if err := json.Unmarshal(data, &dirEnt); err != nil {
+
+		dirEnt := &models.DirEntry{}
+		if err := webref.Load(ctx, d.store, *ent.Ref, dirEnt); err != nil {
 			return nil, err
 		}
 		o, err := wrapObject(d, dirEnt.Name, dirEnt.Object)
@@ -184,7 +183,7 @@ func (d *Dir) put(ctx context.Context, name string, fn ObjectMutator) error {
 		}
 		var o *models.Object
 		if ent != nil {
-			o = &ent.Object
+			o = ent.Object
 		}
 		// mutate the object
 		o2, err := fn(o)
@@ -192,7 +191,7 @@ func (d *Dir) put(ctx context.Context, name string, fn ObjectMutator) error {
 			return nil, err
 		}
 		// replace the entry at name
-		newEnt := models.DirEntry{Name: name, Object: *o2}
+		newEnt := models.DirEntry{Name: name, Object: o2}
 		return dirPut(ctx, store, *cur, newEnt)
 	})
 }
@@ -216,16 +215,24 @@ func (d *Dir) apply(ctx context.Context, fn DirMutator) error {
 
 	err := put(ctx, func(cur *models.Object) (*models.Object, error) {
 		var curDir *models.Dir
-		if cur != nil && cur.Dir != nil {
-			curDir = cur.Dir
+		if cur != nil {
+			od, ok := cur.Value.(*models.Object_Dir)
+			if ok {
+				curDir = od.Dir
+			}
 		}
+
 		var err error
 		newDir, err = fn(ctx, curDir)
 		if err != nil {
 			newDir = nil
 			return nil, err
 		}
-		return &models.Object{Dir: newDir}, nil
+		return &models.Object{
+			Value: &models.Object_Dir{
+				Dir: newDir,
+			},
+		}, nil
 	})
 	if err != nil {
 		return err
@@ -245,12 +252,9 @@ func dirGet(ctx context.Context, store Read, m models.Dir, name string) (*models
 	if treeEnt == nil {
 		return nil, nil
 	}
-	data, err := store.Get(ctx, treeEnt.Ref)
-	if err != nil {
-		return nil, err
-	}
+
 	dirEnt := models.DirEntry{}
-	if err := json.Unmarshal(data, &dirEnt); err != nil {
+	if err := webref.Load(ctx, store, *treeEnt.Ref, &dirEnt); err != nil {
 		return nil, err
 	}
 	return &dirEnt, nil
@@ -265,13 +269,12 @@ func dirPut(ctx context.Context, store ReadWriteOnce, m models.Dir, ent models.D
 		return nil, errors.New("Need writable store")
 	}
 
-	data, _ := json.Marshal(ent)
-	entRef, err := store.Post(ctx, data)
+	ref, err := webref.Store(ctx, store, &ent)
 	if err != nil {
 		return nil, err
 	}
 	key := []byte(ent.Name)
-	tree, err := m.Tree.Put(ctx, store, key, *entRef)
+	tree, err := m.Tree.Put(ctx, store, key, ref)
 	if err != nil {
 		return nil, err
 	}

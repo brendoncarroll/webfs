@@ -12,6 +12,7 @@ type Read interface {
 
 type WriteOnce interface {
 	Post(ctx context.Context, data []byte) (*Ref, error)
+	Options() *Options
 	MaxBlobSize() int
 }
 
@@ -25,7 +26,7 @@ type storeWrapper struct {
 }
 
 func (s *storeWrapper) Post(ctx context.Context, data []byte) (*Ref, error) {
-	return Post(ctx, s.s, data, DefaultOptions())
+	return Post(ctx, s.s, *DefaultOptions(), data)
 }
 
 func (s *storeWrapper) Get(ctx context.Context, ref Ref) ([]byte, error) {
@@ -34,6 +35,10 @@ func (s *storeWrapper) Get(ctx context.Context, ref Ref) ([]byte, error) {
 
 func (s *storeWrapper) MaxBlobSize() int {
 	return s.MaxBlobSize()
+}
+
+func (s *storeWrapper) Options() *Options {
+	return DefaultOptions()
 }
 
 func NewMemStore() ReadWriteOnce {

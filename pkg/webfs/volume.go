@@ -2,12 +2,14 @@ package webfs
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 
 	"github.com/brendoncarroll/webfs/pkg/cells"
 	"github.com/brendoncarroll/webfs/pkg/webfs/models"
+	"github.com/brendoncarroll/webfs/pkg/webref"
 )
+
+const VolumeCodec = webref.CodecJSON
 
 var ErrCASFailed = errors.New("CAS failed. Should Retry")
 
@@ -62,11 +64,12 @@ func (v *Volume) Walk(ctx context.Context, f func(Object) bool) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	data, err := v.getStore().Get(ctx, *cc.ObjectRef)
-	if err != nil {
+	mo := models.Object{}
+	s := v.getStore()
+	if err := webref.Load(ctx, s, *cc.ObjectRef, &mo); err != nil {
 		return false, err
 	}
-	o, err := unmarshalObject(v, "", data)
+	o, err := wrapObject(v, "", &mo)
 	if err != nil {
 		return false, err
 	}
@@ -86,7 +89,7 @@ func (v *Volume) Get(ctx context.Context) (*models.Volume, error) {
 	}
 
 	m := models.Volume{}
-	if err := m.Unmarshal(data); err != nil {
+	if err := webref.Decode(webref.CodecJSON, data, &m); err != nil {
 		return nil, err
 	}
 	return &m, nil
@@ -100,23 +103,21 @@ func (v *Volume) getObject(ctx context.Context) (Object, error) {
 	if m.ObjectRef == nil {
 		return nil, nil
 	}
-	data, err := v.getStore().Get(ctx, *m.ObjectRef)
-	if err != nil {
+	mo := models.Object{}
+	s := v.getStore()
+	if err := webref.Load(ctx, s, *m.ObjectRef, &mo); err != nil {
 		return nil, err
 	}
-	return unmarshalObject(v, "", data)
+	return wrapObject(v, "", &mo)
 }
 
 func (v *Volume) put(ctx context.Context, fn ObjectMutator) error {
 	return v.apply(ctx, func(cur models.Volume) (*models.Volume, error) {
 		var o *models.Object
 		if cur.ObjectRef != nil {
-			data, err := v.getStore().Get(ctx, *cur.ObjectRef)
-			if err != nil {
-				return nil, err
-			}
 			o = &models.Object{}
-			if err := json.Unmarshal(data, o); err != nil {
+			s := v.getStore()
+			if err := webref.Load(ctx, s, *cur.ObjectRef, o); err != nil {
 				return nil, err
 			}
 		}
@@ -126,8 +127,7 @@ func (v *Volume) put(ctx context.Context, fn ObjectMutator) error {
 			return nil, err
 		}
 
-		data, _ := json.Marshal(o2)
-		ref, err := v.getStore().Post(ctx, data)
+		ref, err := webref.Store(ctx, v.getStore(), o2)
 		if err != nil {
 			return nil, err
 		}
@@ -150,7 +150,7 @@ func (v *Volume) apply(ctx context.Context, f VolumeMutator) error {
 		}
 		curV := models.Volume{}
 		if len(cur) > 0 {
-			if err := curV.Unmarshal(cur); err != nil {
+			if err := webref.Decode(VolumeCodec, cur, &curV); err != nil {
 				return err
 			}
 		}
@@ -159,7 +159,10 @@ func (v *Volume) apply(ctx context.Context, f VolumeMutator) error {
 		if err != nil {
 			return err
 		}
-		next := nextV.Marshal()
+		next, err := webref.Encode(VolumeCodec, nextV)
+		if err != nil {
+			return err
+		}
 		success, err = v.cell.CAS(ctx, cur, next)
 		if err != nil {
 			return err
@@ -199,12 +202,13 @@ func (v *Volume) Size() uint64 {
 
 func (v *Volume) getStore() ReadWriteOnce {
 	fs := v.getFS()
-	return &Store{opts: v.getOptions(), ms: fs.store}
+	opts := v.getOptions()
+	return &Store{opts: *opts.DataOpts, ms: fs.store}
 }
 
-func (v *Volume) getOptions() Options {
+func (v *Volume) getOptions() *Options {
 	if v.opts != nil {
-		return *v.opts
+		return v.opts
 	}
 	return DefaultOptions()
 }

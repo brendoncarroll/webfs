@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/brendoncarroll/webfs/pkg/webfs"
+	"github.com/brendoncarroll/webfs/pkg/webref"
 	"github.com/spf13/cobra"
 )
 
@@ -19,7 +20,7 @@ var urldumpCmd = &cobra.Command{
 		}
 
 		err := wfs.RefIter(ctx, func(ref webfs.Ref) bool {
-			for _, u := range ref.GetURLs() {
+			for _, u := range webref.GetURLs(&ref) {
 				fmt.Println(u)
 			}
 			return true

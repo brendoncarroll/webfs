@@ -2,14 +2,15 @@ package webfs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log"
 	"path"
-	"reflect"
 	"sync"
 
 	"github.com/brendoncarroll/webfs/pkg/cells"
+	"github.com/brendoncarroll/webfs/pkg/cells/httpcell"
 	"github.com/brendoncarroll/webfs/pkg/stores"
 	"github.com/brendoncarroll/webfs/pkg/webfs/models"
 )
@@ -138,7 +139,7 @@ func (wfs *WebFS) ImportFile(ctx context.Context, r io.Reader, dst string) error
 func (wfs *WebFS) Mkdir(ctx context.Context, p string) error {
 	p2 := parsePath(p)
 	name := ""
-	if len(p) > 0 {
+	if len(p2) > 0 {
 		name = p2[len(p2)-1]
 	}
 
@@ -258,7 +259,11 @@ func (wfs *WebFS) NewVolume(ctx context.Context, p string, spec models.CellSpec)
 	}
 
 	err = put(ctx, func(cur *models.Object) (*models.Object, error) {
-		return &models.Object{Cell: &spec}, nil
+		return &models.Object{
+			Value: &models.Object_Cell{
+				Cell: &spec,
+			},
+		}, nil
 	})
 	if err != nil {
 		return err
@@ -293,16 +298,17 @@ func (wfs *WebFS) getCellByID(id string) Cell {
 	return cell.(Cell)
 }
 
-func (wfs *WebFS) getCellBySpec(spec models.CellSpec) Cell {
+func (wfs *WebFS) getCellBySpec(spec *models.CellSpec) (Cell, error) {
 	var newCell cells.Cell
-	for _, spec2 := range []interface{}{
-		spec.HTTPCell,
-	} {
-		if spec2 != nil {
-			// this just derefs the spec
-			newCell = cells.Make(reflect.Indirect(reflect.ValueOf(spec2)).Interface())
-			break
+	switch spec.Type {
+	case "HTTPCell":
+		spec2 := httpcell.Spec{}
+		if err := json.Unmarshal(spec.Config, &spec2); err != nil {
+			return nil, err
 		}
+		newCell = cells.Make(spec2)
+	default:
+		return nil, errors.New("cell type not recognized")
 	}
 
 	cell, loaded := wfs.cells.LoadOrStore(newCell.ID(), newCell)
@@ -310,9 +316,9 @@ func (wfs *WebFS) getCellBySpec(spec models.CellSpec) Cell {
 		log.Println("loaded new cell", newCell.ID())
 	}
 	if cell == nil {
-		return nil
+		return nil, errors.New("could not create cell")
 	}
-	return cell.(Cell)
+	return cell.(Cell), nil
 }
 
 func dirpath(p string) string {

@@ -37,7 +37,7 @@ type Object interface {
 
 	getFS() *WebFS
 	getStore() ReadWriteOnce
-	getOptions() Options
+	getOptions() *Options
 }
 
 type baseObject struct {
@@ -64,7 +64,7 @@ func (o *baseObject) getStore() ReadWriteOnce {
 	return o.store
 }
 
-func (o *baseObject) getOptions() Options {
+func (o *baseObject) getOptions() *Options {
 	return o.parent.getOptions()
 }
 
@@ -73,10 +73,10 @@ func unmarshalObject(parent Object, name string, data []byte) (Object, error) {
 	if err := json.Unmarshal(data, &m); err != nil {
 		return nil, err
 	}
-	return wrapObject(parent, name, m)
+	return wrapObject(parent, name, &m)
 }
 
-func wrapObject(parent Object, nameInParent string, o models.Object) (Object, error) {
+func wrapObject(parent Object, nameInParent string, o *models.Object) (Object, error) {
 	base := baseObject{
 		parent:       parent,
 		nameInParent: nameInParent,
@@ -84,39 +84,31 @@ func wrapObject(parent Object, nameInParent string, o models.Object) (Object, er
 		fs:           parent.getFS(),
 	}
 
-	switch {
-	case o.Cell != nil:
+	switch o2 := o.Value.(type) {
+	case *models.Object_Cell:
 		wfs := parent.getFS()
-		cell := wfs.getCellBySpec(*o.Cell)
+		cell, err := wfs.getCellBySpec(o2.Cell)
+		if err != nil {
+			return nil, err
+		}
 		return &Volume{
 			cell:       cell,
 			baseObject: base,
 		}, nil
-	case o.File != nil:
+
+	case *models.Object_File:
 		return &File{
 			baseObject: base,
-			m:          *o.File,
+			m:          *o2.File,
 		}, nil
-	case o.Dir != nil:
+
+	case *models.Object_Dir:
 		return &Dir{
-			m:          *o.Dir,
+			m:          *o2.Dir,
 			baseObject: base,
 		}, nil
+
 	default:
 		return nil, errors.New("Invalid Object")
 	}
-}
-
-func emptyObject(o models.Object) bool {
-	for _, x := range []interface{}{
-		o.Cell,
-		o.File,
-		o.Dir,
-		o.Snapshot,
-	} {
-		if x != nil {
-			return false
-		}
-	}
-	return true
 }

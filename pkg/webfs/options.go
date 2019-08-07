@@ -1,9 +1,14 @@
 package webfs
 
-import "github.com/brendoncarroll/webfs/pkg/webref"
+import (
+	"github.com/brendoncarroll/webfs/pkg/webfs/models"
+	"github.com/brendoncarroll/webfs/pkg/webref"
+)
 
-type Options = webref.Options
+type Options = models.Options
 
-func DefaultOptions() Options {
-	return webref.DefaultOptions()
+func DefaultOptions() *Options {
+	return &Options{
+		DataOpts: webref.DefaultOptions(),
+	}
 }

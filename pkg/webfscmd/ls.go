@@ -16,7 +16,7 @@ var lsHeaders = []string{"PATH", "SIZE", "OBJECT"}
 
 var lsCmd = &cobra.Command{
 	Use:   "ls",
-	Short: "ls",
+	Short: "list files and directories",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := setupWfs(); err != nil {
 			return err

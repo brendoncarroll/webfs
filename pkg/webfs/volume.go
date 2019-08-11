@@ -288,3 +288,42 @@ func (v *Volume) init(ctx context.Context) error {
 	})
 	return err
 }
+
+func (v *Volume) updateSpec(ctx context.Context) error {
+	c, ok := v.cell.(cells.GetSpec)
+	if !ok {
+		return nil
+	}
+	if v.parent == nil {
+		return errors.New("can't update spec for volume without parent")
+	}
+
+	volSpec := v.spec
+	cellSpec, err := cellSpec2Model(c.GetSpec())
+	if err != nil {
+		return err
+	}
+	volSpec.CellSpec = cellSpec
+	v.spec = volSpec
+
+	var put func(context.Context, ObjectMutator) error
+	switch par := v.parent.(type) {
+	case *Volume:
+		put = par.put
+	case *Dir:
+		put = func(ctx context.Context, fn ObjectMutator) error {
+			return par.put(ctx, v.nameInParent, fn)
+		}
+	default:
+		panic("invalid parent")
+	}
+
+	return put(ctx, func(x *models.Object) (*models.Object, error) {
+		y := &models.Object{
+			Value: &models.Object_Volume{
+				Volume: volSpec,
+			},
+		}
+		return y, nil
+	})
+}

@@ -45,7 +45,12 @@ var newVol = &cobra.Command{
 		if err := webref.Decode(webref.CodecJSON, data, &spec); err != nil {
 			return err
 		}
-		return wfs.NewVolume(ctx, path, spec)
+		volID, err := wfs.NewVolume(ctx, path, spec)
+		if err != nil {
+			return err
+		}
+		cmd.Println(volID)
+		return nil
 	},
 	Aliases: []string{"vol"},
 }

@@ -38,6 +38,12 @@ func (fh *FileHandle) Seek(offset int64, whence int) (ret int64, err error) {
 	return fh.offset, nil
 }
 
+func (fh *FileHandle) Write(p []byte) (n int, err error) {
+	n, err = fh.file.WriteAt(p, fh.offset)
+	fh.offset += int64(n)
+	return n, err
+}
+
 func (fh *FileHandle) Read(p []byte) (n int, err error) {
 	n, err = fh.file.ReadAt(p, fh.offset)
 	fh.offset += int64(n)

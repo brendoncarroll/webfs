@@ -1,6 +1,31 @@
 syntax = "proto3";
 
+package webfs;
+
+option go_package = "models";
+
+import "crypto.proto";
+import "ccp.proto";
+
+message CellSpec {
+    oneof spec {
+        HTTPCellSpec http = 1;
+
+        // higher order cells
+        CryptoCellSpec crypto = 128;
+    }
+}
+
 message HTTPCellSpec {
     string url = 1;
     string auth_header = 2;
+}
+
+message CryptoCellSpec {
+    CellSpec inner = 1;
+
+    ccp.Entity private_entity = 2;
+    ccp.Entity public_entity = 3;
+
+    ccp.Who who = 4;
 }

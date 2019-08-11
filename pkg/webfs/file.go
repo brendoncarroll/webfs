@@ -112,6 +112,17 @@ func (f *File) ReadAt(p []byte, off int64) (n int, err error) {
 	return fileReadAt(ctx, f.getStore(), f.m, offset, p)
 }
 
+func (f *File) WriteAt(p []byte, off int64) (n int, err error) {
+	ctx := context.TODO()
+	err = f.Apply(ctx, func(x models.File) (*models.File, error) {
+		return &x, errors.New("File.WriteAt not implemented")
+	})
+	if err != nil {
+		return 0, err
+	}
+	return n, err
+}
+
 func (f *File) Append(p []byte) error {
 	ctx := context.TODO()
 	newFile, err := fileAppend(ctx, f.getStore(), *f.getOptions().DataOpts, f.m, p)

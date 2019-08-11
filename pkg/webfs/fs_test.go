@@ -110,6 +110,8 @@ func TestFileWriteRead(t *testing.T) {
 }
 
 func TestNewVolume(t *testing.T) {
+	ctx, cf := context.WithCancel(ctx)
+	defer cf()
 	mc := memcell.New()
 	ms := stores.NewMemStore(4096)
 	cellServer := httpcell.NewServer()
@@ -125,31 +127,41 @@ func TestNewVolume(t *testing.T) {
 
 	wfs, err := New(mc, ms)
 	require.Nil(t, err)
-	objs, err := wfs.Find(ctx, "")
+	vol, err := wfs.GetVolume(ctx, RootVolumeID)
 	require.Nil(t, err)
-	objs[0].(*Volume).ChangeOptions(ctx, func(x *Options) *Options {
+	err = vol.ChangeOptions(ctx, func(x *Options) *Options {
 		x.DataOpts.Replicas[""] = 1
 		return x
 	})
+	require.Nil(t, err)
 
 	p := "/testvol"
 	vs := models.VolumeSpec{
-		CellSpec: &models.VolumeSpec_Http{&models.HTTPCellSpec{
-			Url: spec.URL,
-		}},
+		CellSpec: &models.CellSpec{
+			Spec: &models.CellSpec_Http{
+				Http: &models.HTTPCellSpec{
+					Url: spec.URL,
+				},
+			},
+		},
 	}
 	err = wfs.Mkdir(ctx, "")
 	require.Nil(t, err)
-	err = wfs.NewVolume(ctx, p, vs)
+	volID, err := wfs.NewVolume(ctx, p, vs)
 	require.Nil(t, err)
-
-	objs, err = wfs.Find(ctx, p)
+	vol, err = wfs.GetVolume(ctx, volID)
 	require.Nil(t, err)
-	assert.Len(t, objs, 1)
+	err = vol.ChangeOptions(ctx, func(x *Options) *Options {
+		x.DataOpts.Replicas[""] = 1
+		return x
+	})
+	require.Nil(t, err)
 
 	err = wfs.Mkdir(ctx, "/testvol")
 	require.Nil(t, err)
+	err = wfs.Mkdir(ctx, "/testvol/testdir")
+	require.Nil(t, err)
 	ents, err := wfs.Ls(ctx, "/testvol")
 	require.Nil(t, err)
-	assert.Len(t, ents, 0)
+	assert.Len(t, ents, 1)
 }

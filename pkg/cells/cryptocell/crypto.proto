@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package ccp;
+
+option go_package = "github.com/brendoncarroll/webfs/pkg/cells/cryptocell";
+
+enum EncAlgo {
+    UNKNOWN_EA = 0;
+    XCHACHA20POLY1305 = 1;
+}
+
+message EncMsg {
+    EncAlgo algo = 1;
+    bytes ctext = 2;
+    bytes nonce = 3;
+}
+
+enum HashFunc {
+    UNKNOWN_HF = 0;
+
+    // might as well use a number at least someone else is using
+    // https://github.com/multiformats/multicodec/blob/master/table.csv
+    SHA256 = 18;
+}
+
+enum SigAlgo {
+    UNKNOWN_SA = 0;
+    ED25519 = 1;
+}
+
+message Sig {
+    HashFunc hash_func = 1;
+    SigAlgo algo = 2;
+    bytes sig = 3;
+}
+
+enum AsymEncAlgo {
+    UNKNOWN_AEA = 0;
+    CURVE25519_NACLBOX = 1;
+}
+
+message AsymEncMsg {
+    AsymEncAlgo algo = 1;
+    Key sender_key = 2;
+    bytes ctext = 3;
+    bytes nonce = 4;
+}
+
+message Entity {
+    Key signing_key = 1;
+    Key encryption_key = 2;
+}
+
+message Key {
+    oneof key {
+        bytes Ed25519_Private = 1;
+        bytes Ed25519 = 2;
+
+        bytes Curve25519_Private = 3;
+        bytes Curve25519 = 4;
+    }
+}

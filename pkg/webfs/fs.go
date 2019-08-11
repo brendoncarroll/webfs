@@ -17,6 +17,10 @@ import (
 	"github.com/brendoncarroll/webfs/pkg/webref"
 )
 
+const (
+	RootVolumeID = "root"
+)
+
 type Ref = webref.Ref
 
 type WebFS struct {
@@ -37,7 +41,7 @@ func New(rootCell Cell, baseStore stores.ReadWriteOnce) (*WebFS, error) {
 
 	rv := &Volume{
 		spec: &models.VolumeSpec{
-			Id: "root",
+			Id: RootVolumeID,
 		},
 		cell: rootCell,
 		baseObject: baseObject{
@@ -233,13 +237,13 @@ func (wfs *WebFS) RefIter(ctx context.Context, f func(ref webref.Ref) bool) erro
 	return topErr
 }
 
-func (wfs *WebFS) NewVolume(ctx context.Context, p string, spec models.VolumeSpec) error {
+func (wfs *WebFS) NewVolume(ctx context.Context, p string, spec models.VolumeSpec) (string, error) {
 	if spec.Id == "" {
 		spec.Id = generateVolId()
 	}
 	var cell cells.Cell
-	switch x := spec.CellSpec.(type) {
-	case *models.VolumeSpec_Http:
+	switch x := spec.CellSpec.Spec.(type) {
+	case *models.CellSpec_Http:
 		spec2 := httpcell.Spec{
 			URL:        x.Http.Url,
 			AuthHeader: x.Http.AuthHeader,
@@ -247,11 +251,11 @@ func (wfs *WebFS) NewVolume(ctx context.Context, p string, spec models.VolumeSpe
 		cell = httpcell.New(spec2)
 	}
 	if cell == nil {
-		return errors.New("could not create cell")
+		return "", errors.New("could not create cell")
 	}
 	_, err := cell.Get(ctx)
 	if err != nil {
-		return errors.New("could not access cell")
+		return "", errors.New("could not access cell")
 	}
 
 	v := models.Object{
@@ -259,7 +263,7 @@ func (wfs *WebFS) NewVolume(ctx context.Context, p string, spec models.VolumeSpe
 			Volume: &spec,
 		},
 	}
-	return wfs.putAt(ctx, parsePath(p), v)
+	return spec.Id, wfs.putAt(ctx, parsePath(p), v)
 }
 
 func (wfs *WebFS) putAt(ctx context.Context, p Path, o models.Object) error {
@@ -337,17 +341,9 @@ func (wfs *WebFS) getCellByURL(id string) Cell {
 }
 
 func (wfs *WebFS) setupCell(spec *models.VolumeSpec) (Cell, error) {
-	var newCell cells.Cell
-
-	switch x := spec.CellSpec.(type) {
-	case *models.VolumeSpec_Http:
-		spec2 := httpcell.Spec{
-			URL:        x.Http.Url,
-			AuthHeader: x.Http.AuthHeader,
-		}
-		newCell = httpcell.New(spec2)
-	default:
-		return nil, errors.New("cell type not recognized")
+	newCell, err := model2Cell(spec.CellSpec)
+	if err != nil {
+		return nil, err
 	}
 
 	cell, loaded := wfs.cells.LoadOrStore(newCell.URL(), newCell)
@@ -358,7 +354,7 @@ func (wfs *WebFS) setupCell(spec *models.VolumeSpec) (Cell, error) {
 		return nil, errors.New("could not create cell")
 	}
 
-	return cell.(Cell), nil
+	return cell.(cells.Cell), nil
 }
 
 func (wfs *WebFS) getStore() *Store {

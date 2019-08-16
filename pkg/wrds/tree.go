@@ -6,13 +6,16 @@ import (
 	"errors"
 	"sort"
 
+	"github.com/brendoncarroll/webfs/pkg/stores"
 	"github.com/brendoncarroll/webfs/pkg/webref"
 )
 
 type Ref = webref.Ref
-type WriteOnce = webref.WriteOnce
-type Read = webref.Read
-type ReadWriteOnce = webref.ReadWriteOnce
+type Options = webref.Options
+
+type WriteOnce = stores.WriteOnce
+type Read = stores.Read
+type ReadWriteOnce = stores.ReadWriteOnce
 
 // a guess. a tree needs to be able to store at least 2 entries.
 const minTreeSize = 1024
@@ -21,9 +24,9 @@ func NewTree() *Tree {
 	return &Tree{Level: 1}
 }
 
-func (t *Tree) Put(ctx context.Context, s ReadWriteOnce, key []byte, ref *Ref) (*Tree, error) {
+func (t *Tree) Put(ctx context.Context, s ReadWriteOnce, opts Options, key []byte, ref *Ref) (*Tree, error) {
 	ent := &TreeEntry{Key: key, Ref: ref}
-	newTree, err := t.put(ctx, s, ent)
+	newTree, err := t.put(ctx, s, opts, ent)
 	if err != nil {
 		return nil, err
 	}
@@ -32,12 +35,12 @@ func (t *Tree) Put(ctx context.Context, s ReadWriteOnce, key []byte, ref *Ref) (
 
 // Split forces the root to split.  The 2 subtrees are posted to s, and a new root is created and returned.
 // Split should be called if the containing data structure can't fit a node into a blob.
-func (t *Tree) Split(ctx context.Context, s ReadWriteOnce) (*Tree, error) {
+func (t *Tree) Split(ctx context.Context, s ReadWriteOnce, opts Options) (*Tree, error) {
 	low, high := t.split()
 	newTree := Tree{Level: t.Level + 1}
 
 	for _, st := range []Tree{low, high} {
-		ref, err := webref.Store(ctx, s, st)
+		ref, err := webref.Store(ctx, s, opts, st)
 		if err != nil {
 			return nil, err
 		}
@@ -47,7 +50,7 @@ func (t *Tree) Split(ctx context.Context, s ReadWriteOnce) (*Tree, error) {
 	return &newTree, nil
 }
 
-func (t *Tree) put(ctx context.Context, s ReadWriteOnce, ent *TreeEntry) (*Tree, error) {
+func (t *Tree) put(ctx context.Context, s stores.ReadWriteOnce, opts Options, ent *TreeEntry) (*Tree, error) {
 	i := t.indexPut(ent.Key)
 
 	entries := []*TreeEntry{}
@@ -65,20 +68,20 @@ func (t *Tree) put(ctx context.Context, s ReadWriteOnce, ent *TreeEntry) (*Tree,
 			return nil, err
 		}
 
-		subTree, err = subTree.put(ctx, s, ent)
+		subTree, err = subTree.put(ctx, s, opts, ent)
 		if err != nil {
 			return nil, err
 		}
 
 		subTrees := []Tree{*subTree}
 		// check if we need to split
-		if webref.SizeOf(s, subTree) > s.MaxBlobSize() {
+		if webref.SizeOf(s, opts, subTree) > s.MaxBlobSize() {
 			low, high := subTree.split()
 			subTrees = []Tree{low, high}
 		}
 		// we either have one or 2 subtrees, post them all and convert to entries
 		for _, st := range subTrees {
-			ref, err := webref.Store(ctx, s, st)
+			ref, err := webref.Store(ctx, s, opts, st)
 			if err != nil {
 				return nil, err
 			}
@@ -125,7 +128,7 @@ func (t *Tree) indexGet(key []byte) int {
 }
 
 // MaxLteq finds the max entry below key.
-func (t *Tree) MaxLteq(ctx context.Context, s webref.Read, key []byte) (*TreeEntry, error) {
+func (t *Tree) MaxLteq(ctx context.Context, s Read, key []byte) (*TreeEntry, error) {
 	i := t.indexGet(key)
 	if i == -1 {
 		return nil, nil
@@ -191,11 +194,11 @@ func (t *Tree) Get(ctx context.Context, s Read, key []byte) (*TreeEntry, error) 
 	}
 }
 
-func (t *Tree) Delete(ctx context.Context, s ReadWriteOnce, key []byte) (*Tree, error) {
-	return t.delete(ctx, s, key)
+func (t *Tree) Delete(ctx context.Context, s ReadWriteOnce, opts Options, key []byte) (*Tree, error) {
+	return t.delete(ctx, s, opts, key)
 }
 
-func (t *Tree) delete(ctx context.Context, s ReadWriteOnce, key []byte) (*Tree, error) {
+func (t *Tree) delete(ctx context.Context, s ReadWriteOnce, opts Options, key []byte) (*Tree, error) {
 	// TODO: not balanced
 	i := t.indexGet(key)
 	if i >= len(t.Entries) {
@@ -217,7 +220,7 @@ func (t *Tree) delete(ctx context.Context, s ReadWriteOnce, key []byte) (*Tree, 
 		if err != nil {
 			return nil, err
 		}
-		newSt, err := subTree.delete(ctx, s, key)
+		newSt, err := subTree.delete(ctx, s, opts, key)
 		if err != nil {
 			return nil, err
 		}
@@ -225,7 +228,7 @@ func (t *Tree) delete(ctx context.Context, s ReadWriteOnce, key []byte) (*Tree, 
 		newEntries := []*TreeEntry{}
 		newEntries = append(newEntries, t.Entries[:i]...)
 		if newSt != nil {
-			ref, err := webref.Store(ctx, s, newSt)
+			ref, err := webref.Store(ctx, s, opts, newSt)
 			if err != nil {
 				return nil, err
 			}

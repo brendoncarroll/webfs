@@ -2,7 +2,6 @@ package webfs
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"log"
@@ -13,18 +12,21 @@ import (
 	"github.com/brendoncarroll/webfs/pkg/cells/httpcell"
 	"github.com/brendoncarroll/webfs/pkg/stores"
 	"github.com/brendoncarroll/webfs/pkg/webfs/models"
+	"github.com/brendoncarroll/webfs/pkg/webref"
 )
 
+type Ref = webref.Ref
+
 type WebFS struct {
-	root  *Volume
-	store stores.ReadWriteOnce
-	cells sync.Map
+	root      *Volume
+	cells     sync.Map
+	baseStore stores.ReadWriteOnce
 }
 
-func New(rootCell Cell, store stores.ReadWriteOnce) (*WebFS, error) {
+func New(rootCell Cell, baseStore stores.ReadWriteOnce) (*WebFS, error) {
 	wfs := &WebFS{
-		store: store,
-		cells: sync.Map{},
+		cells:     sync.Map{},
+		baseStore: baseStore,
 	}
 	wfs.cells.Store("", rootCell)
 	wfs.addCell(rootCell)
@@ -33,10 +35,13 @@ func New(rootCell Cell, store stores.ReadWriteOnce) (*WebFS, error) {
 		cell: rootCell,
 		baseObject: baseObject{
 			fs:           wfs,
-			store:        nil,
 			parent:       nil,
 			nameInParent: "",
 		},
+		opts: nil,
+	}
+	if err := rv.init(context.TODO()); err != nil {
+		return nil, err
 	}
 	wfs.root = rv
 
@@ -204,7 +209,7 @@ func (wfs *WebFS) WalkObjects(ctx context.Context, f func(o Object) bool) error 
 	return err
 }
 
-func (wfs *WebFS) RefIter(ctx context.Context, f func(ref Ref) bool) error {
+func (wfs *WebFS) RefIter(ctx context.Context, f func(ref webref.Ref) bool) error {
 	v := wfs.root
 	var topErr error
 
@@ -222,7 +227,7 @@ func (wfs *WebFS) RefIter(ctx context.Context, f func(ref Ref) bool) error {
 	return topErr
 }
 
-func (wfs *WebFS) NewVolume(ctx context.Context, p string, spec models.CellSpec) error {
+func (wfs *WebFS) NewVolume(ctx context.Context, p string, spec models.VolumeSpec) error {
 	cell := cells.Make(spec)
 	if cell == nil {
 		return errors.New("could not create cell")
@@ -260,8 +265,8 @@ func (wfs *WebFS) NewVolume(ctx context.Context, p string, spec models.CellSpec)
 
 	err = put(ctx, func(cur *models.Object) (*models.Object, error) {
 		return &models.Object{
-			Value: &models.Object_Cell{
-				Cell: &spec,
+			Value: &models.Object_Volume{
+				Volume: &spec,
 			},
 		}, nil
 	})
@@ -298,15 +303,16 @@ func (wfs *WebFS) getCellByID(id string) Cell {
 	return cell.(Cell)
 }
 
-func (wfs *WebFS) getCellBySpec(spec *models.CellSpec) (Cell, error) {
+func (wfs *WebFS) getCellBySpec(spec *models.VolumeSpec) (Cell, error) {
 	var newCell cells.Cell
-	switch spec.Type {
-	case "HTTPCell":
-		spec2 := httpcell.Spec{}
-		if err := json.Unmarshal(spec.Config, &spec2); err != nil {
-			return nil, err
+
+	switch x := spec.CellSpec.(type) {
+	case *models.VolumeSpec_Httpcell:
+		spec2 := httpcell.Spec{
+			URL:        x.Httpcell.Url,
+			AuthHeader: x.Httpcell.AuthHeader,
 		}
-		newCell = cells.Make(spec2)
+		newCell = httpcell.New(spec2)
 	default:
 		return nil, errors.New("cell type not recognized")
 	}
@@ -319,6 +325,16 @@ func (wfs *WebFS) getCellBySpec(spec *models.CellSpec) (Cell, error) {
 		return nil, errors.New("could not create cell")
 	}
 	return cell.(Cell), nil
+}
+
+func (wfs *WebFS) getStore() *Store {
+	routes := []stores.StoreRoute{
+		{
+			Prefix: "",
+			Store:  wfs.baseStore,
+		},
+	}
+	return &Store{router: stores.NewRouter(routes)}
 }
 
 func dirpath(p string) string {

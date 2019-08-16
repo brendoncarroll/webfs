@@ -3,7 +3,6 @@ package webfscmd
 import (
 	"context"
 
-	"github.com/brendoncarroll/webfs/pkg/stores"
 	"github.com/brendoncarroll/webfs/pkg/webfs"
 	"github.com/spf13/cobra"
 )
@@ -24,8 +23,7 @@ func Execute() error {
 
 func setupWfs() (err error) {
 	sb := webfs.SuperblockFromPath(superblockPath)
-	store := stores.NewMuxStore()
-	wfs, err = webfs.New(sb, store)
+	wfs, err = webfs.New(sb, nil)
 	if err != nil {
 		return err
 	}

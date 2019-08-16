@@ -1,11 +1,11 @@
 package webfscmd
 
 import (
-	"encoding/json"
 	"errors"
 	"io/ioutil"
 
 	"github.com/brendoncarroll/webfs/pkg/webfs/models"
+	"github.com/brendoncarroll/webfs/pkg/webref"
 	"github.com/spf13/cobra"
 )
 
@@ -40,8 +40,8 @@ var newVol = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		spec := models.CellSpec{}
-		if err := json.Unmarshal(data, &spec); err != nil {
+		spec := models.VolumeSpec{}
+		if err := webref.Decode(webref.CodecJSON, data, &spec); err != nil {
 			return err
 		}
 

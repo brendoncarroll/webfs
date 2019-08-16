@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/brendoncarroll/webfs/pkg/stores"
 	"github.com/brendoncarroll/webfs/pkg/webref"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -29,14 +30,15 @@ func TestIndexOf(t *testing.T) {
 
 func TestPutGet(t *testing.T) {
 	const N = 10
-	s := webref.NewMemStore()
+	s := stores.NewMemStore()
+	opts := *webref.DefaultOptions()
 
 	tree := NewTree()
 	var err error
 	for i := 0; i < N; i++ {
 		key := []byte(fmt.Sprintf("key%03d", i))
 		ref := &webref.Ref{}
-		tree, err = tree.Put(ctx, s, key, ref)
+		tree, err = tree.Put(ctx, s, opts, key, ref)
 		require.Nil(t, err)
 	}
 	t.Log("tree root has", len(tree.Entries), "entries")

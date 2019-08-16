@@ -8,6 +8,8 @@ import (
 	ipfsapi "github.com/ipfs/go-ipfs-api"
 )
 
+const MaxBlobSize = 1 << 20 // 1MiB
+
 type IPFSStore struct {
 	client *ipfsapi.Shell
 }
@@ -27,7 +29,7 @@ func (s *IPFSStore) Get(ctx context.Context, key string) ([]byte, error) {
 	return s.client.BlockGet(p)
 }
 
-func (s *IPFSStore) Put(ctx context.Context, key string, data []byte) (string, error) {
+func (s *IPFSStore) Post(ctx context.Context, key string, data []byte) (string, error) {
 	var (
 		format = ""
 		mhtype = ""
@@ -38,4 +40,8 @@ func (s *IPFSStore) Put(ctx context.Context, key string, data []byte) (string, e
 		return "", err
 	}
 	return k, nil
+}
+
+func (s *IPFSStore) MaxBlobSize() int {
+	return MaxBlobSize
 }

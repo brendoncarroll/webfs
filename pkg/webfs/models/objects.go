@@ -5,7 +5,7 @@ import (
 )
 
 type Snapshot struct {
-	Cell      CellSpec  `json:"cell"`
-	Contents  Volume    `json:"contents"`
-	Timestamp time.Time `json:"timestamp"`
+	Cell      VolumeSpec `json:"cell"`
+	Commit    Commit     `json:"contents"`
+	Timestamp time.Time  `json:"timestamp"`
 }

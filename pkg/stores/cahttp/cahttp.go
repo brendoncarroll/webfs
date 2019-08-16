@@ -19,7 +19,10 @@ type CAHttpStore struct {
 	maxBlobSize int
 }
 
-func NewCAHttp(endpoint string, prefix string) *CAHttpStore {
+func New(endpoint string, prefix string) *CAHttpStore {
+	if len(endpoint) > 0 && endpoint[len(endpoint)-1] != '/' {
+		endpoint += "/"
+	}
 	return &CAHttpStore{
 		endpoint:    endpoint,
 		maxBlobSize: MaxBlobSize,
@@ -33,7 +36,7 @@ func (hs *CAHttpStore) Get(ctx context.Context, key string) ([]byte, error) {
 		return nil, err
 	}
 
-	resp, err := http.Get(hs.endpoint + "/" + key2)
+	resp, err := http.Get(hs.endpoint + key2)
 	if err != nil {
 		return nil, err
 	}

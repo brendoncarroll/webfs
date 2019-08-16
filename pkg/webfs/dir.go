@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/brendoncarroll/webfs/pkg/stores"
 	"github.com/brendoncarroll/webfs/pkg/webfs/models"
 	"github.com/brendoncarroll/webfs/pkg/webref"
 	"github.com/brendoncarroll/webfs/pkg/wrds"
@@ -26,7 +27,6 @@ func newDir(ctx context.Context, parent Object, name string) (*Dir, error) {
 	dir := &Dir{
 		baseObject: baseObject{
 			parent:       parent,
-			store:        parent.getStore(),
 			nameInParent: name,
 		},
 	}
@@ -78,7 +78,7 @@ func (d *Dir) Walk(ctx context.Context, f func(Object) bool) (bool, error) {
 		return cont, nil
 	}
 
-	iter, err := d.m.Tree.Iterate(ctx, d.store, nil)
+	iter, err := d.m.Tree.Iterate(ctx, d.getStore(), nil)
 	if err != nil {
 		return false, nil
 	}
@@ -92,7 +92,7 @@ func (d *Dir) Walk(ctx context.Context, f func(Object) bool) (bool, error) {
 		}
 
 		dirEnt := models.DirEntry{}
-		if err := webref.Load(ctx, d.store, *ent.Ref, &dirEnt); err != nil {
+		if err := webref.Load(ctx, d.getStore(), *ent.Ref, &dirEnt); err != nil {
 			return false, err
 		}
 
@@ -107,24 +107,24 @@ func (d *Dir) Walk(ctx context.Context, f func(Object) bool) (bool, error) {
 }
 
 func (d *Dir) Get(ctx context.Context, name string) (*models.DirEntry, error) {
-	return dirGet(ctx, d.store, d.m, name)
+	return dirGet(ctx, d.getStore(), d.m, name)
 }
 
 func (d *Dir) Put(ctx context.Context, ent models.DirEntry) error {
 	return d.apply(ctx, func(ctx context.Context, cur *models.Dir) (*models.Dir, error) {
-		return dirPut(ctx, d.store, *cur, ent)
+		return dirPut(ctx, d.getStore(), *d.getOptions().DataOpts, *cur, ent)
 	})
 }
 
 func (d *Dir) Delete(ctx context.Context, name string) error {
 	return d.apply(ctx, func(ctx context.Context, cur *models.Dir) (*models.Dir, error) {
-		return dirDelete(ctx, d.store, *cur, name)
+		return dirDelete(ctx, d.getStore(), *d.getOptions().DataOpts, *cur, name)
 	})
 }
 
 func (d *Dir) Entries(ctx context.Context) ([]DirEntry, error) {
 	entries := []DirEntry{}
-	iter, err := d.m.Tree.Iterate(ctx, d.store, nil)
+	iter, err := d.m.Tree.Iterate(ctx, d.getStore(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +139,7 @@ func (d *Dir) Entries(ctx context.Context) ([]DirEntry, error) {
 		}
 
 		dirEnt := &models.DirEntry{}
-		if err := webref.Load(ctx, d.store, *ent.Ref, dirEnt); err != nil {
+		if err := webref.Load(ctx, d.getStore(), *ent.Ref, dirEnt); err != nil {
 			return nil, err
 		}
 		o, err := wrapObject(d, dirEnt.Name, dirEnt.Object)
@@ -152,8 +152,8 @@ func (d *Dir) Entries(ctx context.Context) ([]DirEntry, error) {
 	return entries, nil
 }
 
-func (d *Dir) RefIter(ctx context.Context, f func(Ref) bool) (bool, error) {
-	return refIterTree(ctx, d.store, d.m.Tree, f)
+func (d *Dir) RefIter(ctx context.Context, f func(webref.Ref) bool) (bool, error) {
+	return refIterTree(ctx, d.getStore(), d.m.Tree, f)
 }
 
 func (d *Dir) Size() uint64 {
@@ -174,10 +174,11 @@ func (d *Dir) String() string {
 // }
 
 func (d *Dir) put(ctx context.Context, name string, fn ObjectMutator) error {
-	store := d.store.(ReadWriteOnce)
+	store := d.getStore()
+	opts := d.getOptions().DataOpts
 	return d.apply(ctx, func(ctx context.Context, cur *models.Dir) (*models.Dir, error) {
 		// get the entry at name
-		ent, err := dirGet(ctx, d.store, *cur, name)
+		ent, err := dirGet(ctx, store, *cur, name)
 		if err != nil {
 			return nil, err
 		}
@@ -192,7 +193,7 @@ func (d *Dir) put(ctx context.Context, name string, fn ObjectMutator) error {
 		}
 		// replace the entry at name
 		newEnt := models.DirEntry{Name: name, Object: o2}
-		return dirPut(ctx, store, *cur, newEnt)
+		return dirPut(ctx, store, *opts, *cur, newEnt)
 	})
 }
 
@@ -243,7 +244,7 @@ func (d *Dir) apply(ctx context.Context, fn DirMutator) error {
 	return nil
 }
 
-func dirGet(ctx context.Context, store Read, m models.Dir, name string) (*models.DirEntry, error) {
+func dirGet(ctx context.Context, store stores.Read, m models.Dir, name string) (*models.DirEntry, error) {
 	key := []byte(name)
 	treeEnt, err := m.Tree.Get(ctx, store, key)
 	if err != nil {
@@ -260,30 +261,26 @@ func dirGet(ctx context.Context, store Read, m models.Dir, name string) (*models
 	return &dirEnt, nil
 }
 
-func dirPut(ctx context.Context, store ReadWriteOnce, m models.Dir, ent models.DirEntry) (*models.Dir, error) {
+func dirPut(ctx context.Context, store stores.ReadWriteOnce, opts webref.Options, m models.Dir, ent models.DirEntry) (*models.Dir, error) {
 	if strings.Contains(ent.Name, "/") {
 		return nil, errors.New("directory name contains a slash")
 	}
-	store, ok := store.(ReadWriteOnce)
-	if !ok {
-		return nil, errors.New("Need writable store")
-	}
 
-	ref, err := webref.Store(ctx, store, &ent)
+	ref, err := webref.Store(ctx, store, opts, &ent)
 	if err != nil {
 		return nil, err
 	}
 	key := []byte(ent.Name)
-	tree, err := m.Tree.Put(ctx, store, key, ref)
+	tree, err := m.Tree.Put(ctx, store, opts, key, ref)
 	if err != nil {
 		return nil, err
 	}
 	return &models.Dir{Tree: tree}, nil
 }
 
-func dirDelete(ctx context.Context, store ReadWriteOnce, m models.Dir, name string) (*models.Dir, error) {
+func dirDelete(ctx context.Context, store stores.ReadWriteOnce, opts webref.Options, m models.Dir, name string) (*models.Dir, error) {
 	key := []byte(name)
-	newTree, err := m.Tree.Delete(ctx, store, key)
+	newTree, err := m.Tree.Delete(ctx, store, opts, key)
 	if err != nil {
 		return nil, err
 	}

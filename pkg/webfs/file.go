@@ -7,7 +7,9 @@ import (
 	"errors"
 	"io"
 
+	"github.com/brendoncarroll/webfs/pkg/stores"
 	"github.com/brendoncarroll/webfs/pkg/webfs/models"
+	"github.com/brendoncarroll/webfs/pkg/webref"
 	"github.com/brendoncarroll/webfs/pkg/wrds"
 )
 
@@ -25,7 +27,6 @@ func newFile(ctx context.Context, parent Object, name string) (*File, error) {
 		baseObject: baseObject{
 			parent:       parent,
 			nameInParent: name,
-			store:        parent.getStore(),
 		},
 	}
 	if err := f.SetData(ctx, nil); err != nil {
@@ -39,7 +40,7 @@ func (f *File) SetData(ctx context.Context, r io.Reader) error {
 		r = &bytes.Buffer{}
 	}
 	m := &models.File{Tree: wrds.NewTree()}
-	buf := make([]byte, f.store.MaxBlobSize())
+	buf := make([]byte, f.getStore().MaxBlobSize())
 	if len(buf) == 0 {
 		panic("max blob size 0")
 	}
@@ -53,7 +54,7 @@ func (f *File) SetData(ctx context.Context, r io.Reader) error {
 			return err
 		}
 		data := buf[:n]
-		m, err = fileAppend(ctx, f.store, *m, data)
+		m, err = fileAppend(ctx, f.getStore(), *f.getOptions().DataOpts, *m, data)
 		if err != nil {
 			return err
 		}
@@ -87,7 +88,7 @@ func (f *File) Walk(ctx context.Context, fn func(Object) bool) (bool, error) {
 func (f *File) ReadAt(p []byte, off int64) (n int, err error) {
 	ctx := context.TODO()
 	offset := uint64(off)
-	return fileReadAt(ctx, f.store, f.m, offset, p)
+	return fileReadAt(ctx, f.getStore(), f.m, offset, p)
 }
 
 // Split attempts to make the file smaller.
@@ -109,8 +110,8 @@ func (f File) String() string {
 	return "Object{File}"
 }
 
-func (f *File) RefIter(ctx context.Context, fn func(Ref) bool) (bool, error) {
-	return refIterTree(ctx, f.store, f.m.Tree, fn)
+func (f *File) RefIter(ctx context.Context, fn func(webref.Ref) bool) (bool, error) {
+	return refIterTree(ctx, f.getStore(), f.m.Tree, fn)
 }
 
 func (f *File) apply(ctx context.Context, fn FileMutator) error {
@@ -152,22 +153,20 @@ func (f *File) apply(ctx context.Context, fn FileMutator) error {
 	return nil
 }
 
-func (f *File) getStore() ReadWriteOnce {
-	return f.store
-}
-
-func fileAppend(ctx context.Context, s ReadWriteOnce, x models.File, p []byte) (*models.File, error) {
-	var err error
+func fileAppend(ctx context.Context, s stores.ReadWriteOnce, opts webref.Options, x models.File, p []byte) (*models.File, error) {
+	var (
+		err error
+	)
 	y := &models.File{}
 
-	ref, err := s.Post(ctx, p)
+	ref, err := webref.Post(ctx, s, opts, p)
 	if err != nil {
 		return nil, err
 	}
 
 	offset := x.Size
 	key := offset2Key(offset)
-	y.Tree, err = x.Tree.Put(ctx, s, key[:], ref)
+	y.Tree, err = x.Tree.Put(ctx, s, opts, key[:], ref)
 	if err != nil {
 		return nil, err
 	}
@@ -175,7 +174,7 @@ func fileAppend(ctx context.Context, s ReadWriteOnce, x models.File, p []byte) (
 	return y, nil
 }
 
-func fileReadAt(ctx context.Context, s ReadWriteOnce, x models.File, offset uint64, p []byte) (n int, err error) {
+func fileReadAt(ctx context.Context, s stores.ReadWriteOnce, x models.File, offset uint64, p []byte) (n int, err error) {
 	for n < len(p) {
 		ent, err := x.Tree.MaxLteq(ctx, s, offset2Key(offset))
 		if err != nil {
@@ -191,7 +190,7 @@ func fileReadAt(ctx context.Context, s ReadWriteOnce, x models.File, offset uint
 			return 0, errors.New("got wrong entry from tree")
 		}
 		relo := offset - o
-		data, err := s.Get(ctx, *ent.Ref)
+		data, err := webref.Get(ctx, s, *ent.Ref)
 		if err != nil {
 			return n, err
 		}
@@ -217,7 +216,7 @@ func key2Offset(x []byte) uint64 {
 	return binary.BigEndian.Uint64(x)
 }
 
-func refIterTree(ctx context.Context, store Read, t *wrds.Tree, f func(Ref) bool) (bool, error) {
+func refIterTree(ctx context.Context, store stores.Read, t *wrds.Tree, f func(webref.Ref) bool) (bool, error) {
 	iter, err := t.Iterate(ctx, store, nil)
 	if err != nil {
 		return false, err

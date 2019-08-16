@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/brendoncarroll/webfs/pkg/stores"
 	"github.com/brendoncarroll/webfs/pkg/webfs/models"
 	"github.com/brendoncarroll/webfs/pkg/webref"
 	"github.com/brendoncarroll/webfs/pkg/wrds"
@@ -13,7 +14,8 @@ import (
 
 func TestFileAppend(t *testing.T) {
 	ctx := context.TODO()
-	ms := webref.NewMemStore()
+	opts := webref.DefaultOptions()
+	store := stores.NewMemStore()
 	f := &models.File{Tree: wrds.NewTree()}
 
 	testData := []string{
@@ -28,7 +30,7 @@ func TestFileAppend(t *testing.T) {
 	)
 	for _, s := range testData {
 		d := []byte(s)
-		f, err = fileAppend(ctx, ms, *f, d)
+		f, err = fileAppend(ctx, store, *opts, *f, d)
 		n += len(d)
 		require.Nil(t, err)
 	}

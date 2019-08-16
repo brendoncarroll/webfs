@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package webfs;
+option go_package = "models";
+
+message CAHTTPSpec {
+    string prefix = 1;
+    string endpoint = 2;
+}
+
+message IPFSSpec {
+    string endpoint = 1;
+}

@@ -15,7 +15,7 @@ var ErrCASFailed = errors.New("CAS failed. Should Retry")
 
 type Cell = cells.Cell
 
-type VolumeMutator func(models.Volume) (*models.Volume, error)
+type VolumeMutator func(models.Commit) (*models.Commit, error)
 type ObjectMutator func(*models.Object) (*models.Object, error)
 
 type Volume struct {
@@ -77,21 +77,26 @@ func (v *Volume) Walk(ctx context.Context, f func(Object) bool) (bool, error) {
 	return o.Walk(ctx, f)
 }
 
-func (v *Volume) Get(ctx context.Context) (*models.Volume, error) {
+func (v *Volume) Get(ctx context.Context) (*models.Commit, error) {
+	return v.get(ctx)
+}
+
+func (v *Volume) get(ctx context.Context) (*models.Commit, error) {
 	data, err := v.cell.Get(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if len(data) < 1 {
-		return &models.Volume{
+		return &models.Commit{
 			Options: DefaultOptions(),
 		}, nil
 	}
 
-	m := models.Volume{}
+	m := models.Commit{}
 	if err := webref.Decode(webref.CodecJSON, data, &m); err != nil {
 		return nil, err
 	}
+	v.opts = m.Options
 	return &m, nil
 }
 
@@ -112,7 +117,7 @@ func (v *Volume) getObject(ctx context.Context) (Object, error) {
 }
 
 func (v *Volume) put(ctx context.Context, fn ObjectMutator) error {
-	return v.apply(ctx, func(cur models.Volume) (*models.Volume, error) {
+	return v.apply(ctx, func(cur models.Commit) (*models.Commit, error) {
 		var o *models.Object
 		if cur.ObjectRef != nil {
 			o = &models.Object{}
@@ -127,12 +132,12 @@ func (v *Volume) put(ctx context.Context, fn ObjectMutator) error {
 			return nil, err
 		}
 
-		ref, err := webref.Store(ctx, v.getStore(), o2)
+		ref, err := webref.Store(ctx, v.getStore(), *v.getOptions().DataOpts, o2)
 		if err != nil {
 			return nil, err
 		}
 
-		next := models.Volume{
+		next := models.Commit{
 			ObjectRef: ref,
 			Options:   cur.Options,
 		}
@@ -148,11 +153,13 @@ func (v *Volume) apply(ctx context.Context, f VolumeMutator) error {
 		if err != nil {
 			return err
 		}
-		curV := models.Volume{}
+		curV := models.Commit{}
 		if len(cur) > 0 {
 			if err := webref.Decode(VolumeCodec, cur, &curV); err != nil {
 				return err
 			}
+		} else {
+			curV.Options = DefaultOptions()
 		}
 
 		nextV, err := f(curV)
@@ -183,7 +190,7 @@ func (v *Volume) Path() Path {
 	return v.parent.Path()
 }
 
-func (v *Volume) RefIter(ctx context.Context, f func(Ref) bool) (bool, error) {
+func (v *Volume) RefIter(ctx context.Context, f func(webref.Ref) bool) (bool, error) {
 	cc, err := v.Get(ctx)
 	if err != nil {
 		return false, err
@@ -200,15 +207,41 @@ func (v *Volume) Size() uint64 {
 	return 0
 }
 
-func (v *Volume) getStore() ReadWriteOnce {
-	fs := v.getFS()
+func (v *Volume) getStore() *Store {
+	var parentStore *Store
+	if v.parent != nil {
+		parentStore = v.parent.getStore()
+	} else {
+		parentStore = v.getFS().getStore()
+	}
+
 	opts := v.getOptions()
-	return &Store{opts: *opts.DataOpts, ms: fs.store}
+	store, err := newStore(parentStore, opts.StoreSpecs)
+	if err != nil {
+		panic(err)
+	}
+	return store
 }
 
 func (v *Volume) getOptions() *Options {
-	if v.opts != nil {
+	switch {
+	case v.parent == nil && v.opts == nil:
+		return DefaultOptions()
+	case v.parent == nil:
 		return v.opts
+	default:
+		parentOpts := v.parent.getOptions()
+		return MergeOptions(parentOpts, v.opts)
 	}
-	return DefaultOptions()
+}
+
+func (v *Volume) init(ctx context.Context) error {
+	err := v.apply(ctx, func(x models.Commit) (*models.Commit, error) {
+		y := x
+		if y.Options == nil {
+			y.Options = DefaultOptions()
+		}
+		return &y, nil
+	})
+	return err
 }

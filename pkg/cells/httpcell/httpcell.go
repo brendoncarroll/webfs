@@ -28,23 +28,23 @@ type Spec struct {
 	AuthHeader string
 }
 
-type HttpCell struct {
+type Cell struct {
 	Spec
 	hc *http.Client
 }
 
-func New(spec Spec) *HttpCell {
-	return &HttpCell{
+func New(spec Spec) *Cell {
+	return &Cell{
 		Spec: spec,
 		hc:   http.DefaultClient,
 	}
 }
 
-func (c *HttpCell) ID() string {
+func (c *Cell) ID() string {
 	return "httpcell-" + c.URL
 }
 
-func (c *HttpCell) Get(ctx context.Context) ([]byte, error) {
+func (c *Cell) Get(ctx context.Context) ([]byte, error) {
 	req, err := http.NewRequest(http.MethodGet, c.Spec.URL, nil)
 	if err != nil {
 		panic(err)
@@ -66,7 +66,7 @@ func (c *HttpCell) Get(ctx context.Context) ([]byte, error) {
 	return data, nil
 }
 
-func (c *HttpCell) CAS(ctx context.Context, cur, next []byte) (bool, error) {
+func (c *Cell) CAS(ctx context.Context, cur, next []byte) (bool, error) {
 	curHash := sha3.Sum256(cur)
 	curHashb64 := base64.URLEncoding.EncodeToString(curHash[:])
 	req, err := http.NewRequest(http.MethodPut, c.URL, bytes.NewBuffer(next))

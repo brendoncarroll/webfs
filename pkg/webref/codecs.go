@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 
+	"github.com/brendoncarroll/webfs/pkg/stores"
 	"github.com/golang/protobuf/jsonpb"
 	"github.com/golang/protobuf/proto"
 )
@@ -15,8 +17,8 @@ const (
 	CodecProtobuf = "PB"
 )
 
-func Load(ctx context.Context, s Read, ref Ref, x interface{}) error {
-	data, err := s.Get(ctx, ref)
+func Load(ctx context.Context, s stores.Read, ref Ref, x interface{}) error {
+	data, err := Get(ctx, s, ref)
 	if err != nil {
 		return err
 	}
@@ -27,10 +29,8 @@ func Load(ctx context.Context, s Read, ref Ref, x interface{}) error {
 	return Decode(codec, data, x)
 }
 
-func Store(ctx context.Context, s WriteOnce, x interface{}) (*Ref, error) {
-	o := s.Options()
-
-	codec := o.Attrs["codec"]
+func Store(ctx context.Context, s stores.WriteOnce, opts Options, x interface{}) (*Ref, error) {
+	codec := opts.Attrs["codec"]
 	if codec == "" {
 		codec = CodecJSON
 	}
@@ -38,7 +38,7 @@ func Store(ctx context.Context, s WriteOnce, x interface{}) (*Ref, error) {
 	if err != nil {
 		return nil, err
 	}
-	ref, err := s.Post(ctx, data)
+	ref, err := Post(ctx, s, opts, data)
 	if err != nil {
 		return nil, err
 	}
@@ -49,8 +49,7 @@ func Store(ctx context.Context, s WriteOnce, x interface{}) (*Ref, error) {
 	return ref, nil
 }
 
-func SizeOf(s WriteOnce, x interface{}) int {
-	o := s.Options()
+func SizeOf(s stores.WriteOnce, o Options, x interface{}) int {
 	codec := o.Attrs["codec"]
 	data, err := Encode(codec, x)
 	if err != nil {
@@ -74,10 +73,17 @@ func Encode(codec string, x interface{}) (data []byte, err error) {
 			}
 			data = buf.Bytes()
 		} else {
+			log.Printf("WARN: using regular json encoder for type %T\n", x)
 			data, err = json.Marshal(x)
 			if err != nil {
 				return nil, err
 			}
+		}
+	case CodecProtobuf:
+		if pm, ok := x.(proto.Message); ok {
+			data, err = proto.Marshal(pm)
+		} else {
+			return nil, errors.New("cannot marshal non-protobuf as protobuf")
 		}
 	default:
 		return nil, errors.New("unrecognized codec: " + codec)
@@ -97,6 +103,13 @@ func Decode(codec string, data []byte, x interface{}) error {
 			if err := json.Unmarshal(data, x); err != nil {
 				return err
 			}
+		}
+
+	case CodecProtobuf:
+		if pm, ok := x.(proto.Message); ok {
+			return proto.Unmarshal(data, pm)
+		} else {
+			return errors.New("cannot unmarshal into non-protobuf")
 		}
 
 	default:

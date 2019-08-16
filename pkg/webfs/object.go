@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/brendoncarroll/webfs/pkg/webfs/models"
+	"github.com/brendoncarroll/webfs/pkg/webref"
 )
 
 type Path []string
@@ -33,16 +34,15 @@ type Object interface {
 	Size() uint64
 	String() string
 
-	RefIter(ctx context.Context, f func(Ref) bool) (bool, error)
+	RefIter(ctx context.Context, f func(webref.Ref) bool) (bool, error)
 
 	getFS() *WebFS
-	getStore() ReadWriteOnce
+	getStore() *Store
 	getOptions() *Options
 }
 
 type baseObject struct {
-	fs    *WebFS
-	store ReadWriteOnce
+	fs *WebFS
 
 	parent       Object
 	nameInParent string
@@ -60,8 +60,8 @@ func (o *baseObject) getFS() *WebFS {
 	return o.fs
 }
 
-func (o *baseObject) getStore() ReadWriteOnce {
-	return o.store
+func (o *baseObject) getStore() *Store {
+	return o.parent.getStore()
 }
 
 func (o *baseObject) getOptions() *Options {
@@ -80,14 +80,13 @@ func wrapObject(parent Object, nameInParent string, o *models.Object) (Object, e
 	base := baseObject{
 		parent:       parent,
 		nameInParent: nameInParent,
-		store:        parent.getStore(),
 		fs:           parent.getFS(),
 	}
 
 	switch o2 := o.Value.(type) {
-	case *models.Object_Cell:
+	case *models.Object_Volume:
 		wfs := parent.getFS()
-		cell, err := wfs.getCellBySpec(o2.Cell)
+		cell, err := wfs.getCellBySpec(o2.Volume)
 		if err != nil {
 			return nil, err
 		}

@@ -41,6 +41,9 @@ func DefaultOptions() *Options {
 		panic(err)
 	}
 	return &Options{
+		Attrs: map[string]string{
+			"codec": CodecJSON,
+		},
 		EncAlgo:         EncAlgo_CHACHA20,
 		SecretSeed:      secret[:],
 		ObfuscateLength: false,

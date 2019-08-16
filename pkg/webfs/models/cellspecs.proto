@@ -1,0 +1,6 @@
+syntax = "proto3";
+
+message HTTPCellSpec {
+    string url = 1;
+    string auth_header = 2;
+}

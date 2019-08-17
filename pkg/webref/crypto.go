@@ -6,6 +6,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"errors"
+	fmt "fmt"
 
 	"golang.org/x/crypto/sha3"
 
@@ -30,7 +31,7 @@ func PostCrypto(ctx context.Context, s stores.WriteOnce, prefix string, data []b
 		EncAlgo: o.EncAlgo,
 		Dek:     secret,
 		Url:     string(key),
-		Length:  int32(len(data)),
+		Length:  int32(len(ctext)),
 	}, nil
 }
 
@@ -38,6 +39,9 @@ func GetCrypto(ctx context.Context, store stores.Read, r *CryptoRef) ([]byte, er
 	payload, err := store.Get(ctx, r.Url)
 	if err != nil {
 		return nil, err
+	}
+	if len(payload) < int(r.Length) {
+		return nil, fmt.Errorf("broken ref length is wrong have: %d want: %d", len(payload), r.Length)
 	}
 	if err := crypt(r.EncAlgo, r.Dek, payload, payload); err != nil {
 		return nil, err

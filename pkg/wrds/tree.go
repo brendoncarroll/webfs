@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	fmt "fmt"
 	"sort"
 
 	"github.com/brendoncarroll/webfs/pkg/stores"
@@ -17,8 +18,10 @@ type WriteOnce = stores.WriteOnce
 type Read = stores.Read
 type ReadWriteOnce = stores.ReadWriteOnce
 
-// a guess. a tree needs to be able to store at least 2 entries.
-const minTreeSize = 1024
+const (
+	// minimum entries to split
+	splitMinEntries = 4
+)
 
 func NewTree() *Tree {
 	return &Tree{Level: 1}
@@ -34,20 +37,36 @@ func (t *Tree) Put(ctx context.Context, s ReadWriteOnce, opts Options, key []byt
 }
 
 // Split forces the root to split.  The 2 subtrees are posted to s, and a new root is created and returned.
-// Split should be called if the containing data structure can't fit a node into a blob.
-func (t *Tree) Split(ctx context.Context, s ReadWriteOnce, opts Options) (*Tree, error) {
-	low, high := t.split()
-	newTree := Tree{Level: t.Level + 1}
+// Split should be called if the containing data structure can't fit into a blob.
+func (t *Tree) Split(ctx context.Context, s WriteOnce, opts Options) (*Tree, error) {
+	newTree := &Tree{Level: t.Level + 1}
 
-	for _, st := range []Tree{low, high} {
-		ref, err := webref.Store(ctx, s, opts, st)
+	low, high := t.split()
+	subTrees := []Tree{low, high}
+	for len(subTrees) > 0 {
+		// pop
+		st := subTrees[0]
+		subTrees = subTrees[1:]
+
+		ref, err := webref.Store(ctx, s, opts, &st)
+		if err == webref.ErrMaxSizeExceeded {
+			if len(st.Entries) < splitMinEntries {
+				return nil, fmt.Errorf("cannot further split tree")
+			}
+			l2, h2 := st.split()
+			subTrees = append(subTrees, l2)
+			subTrees = append(subTrees, h2)
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
+
 		ent := &TreeEntry{Key: st.MinKey(), Ref: ref}
 		newTree.Entries = append(newTree.Entries, ent)
 	}
-	return &newTree, nil
+
+	return newTree, nil
 }
 
 func (t *Tree) put(ctx context.Context, s stores.ReadWriteOnce, opts Options, ent *TreeEntry) (*Tree, error) {

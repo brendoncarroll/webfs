@@ -91,17 +91,6 @@ func (f *File) ReadAt(p []byte, off int64) (n int, err error) {
 	return fileReadAt(ctx, f.getStore(), f.m, offset, p)
 }
 
-// Split attempts to make the file smaller.
-// func (f *File) split(ctx context.Context, store ReadWriteOnce) error {
-// 	newTree, err := f.m.Tree.Split(ctx, store)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	m := &File{Tree: newTree}
-// 	return nil
-// 	return &File{Tree: newTree}, nil
-// }
-
 func (f *File) Size() uint64 {
 	return f.m.Size
 }
@@ -204,6 +193,16 @@ func fileReadAt(ctx context.Context, s stores.ReadWriteOnce, x models.File, offs
 	}
 
 	return n, nil
+}
+
+func fileSplit(ctx context.Context, store stores.ReadWriteOnce, opts webref.Options, x models.File) (*models.File, error) {
+	newTree, err := x.Tree.Split(ctx, store, opts)
+	if err != nil {
+		return nil, err
+	}
+	y := x
+	y.Tree = newTree
+	return &y, nil
 }
 
 func offset2Key(x uint64) []byte {

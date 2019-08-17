@@ -38,6 +38,7 @@ func Store(ctx context.Context, s stores.WriteOnce, opts Options, x interface{})
 	if err != nil {
 		return nil, err
 	}
+
 	ref, err := Post(ctx, s, opts, data)
 	if err != nil {
 		return nil, err

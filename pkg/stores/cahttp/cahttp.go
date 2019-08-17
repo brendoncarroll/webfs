@@ -5,10 +5,13 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"strings"
+
+	"github.com/brendoncarroll/webfs/pkg/stores"
 )
 
 const MaxBlobSize = 1 << 16
@@ -46,7 +49,10 @@ func (hs *CAHttpStore) Get(ctx context.Context, key string) ([]byte, error) {
 		}
 	}()
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, nil
+		return nil, stores.ErrNotFound
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("got non-200 status: %s", resp.Status)
 	}
 
 	data, err := ioutil.ReadAll(resp.Body)
@@ -62,6 +68,9 @@ func (hs *CAHttpStore) Check(ctx context.Context, key string) (bool, error) {
 }
 
 func (hs *CAHttpStore) Post(ctx context.Context, prefix string, data []byte) (string, error) {
+	if len(data) > hs.maxBlobSize {
+		return "", stores.ErrMaxSizeExceeded
+	}
 	_, err := hs.removePrefix(prefix)
 	if err != nil {
 		return "", err

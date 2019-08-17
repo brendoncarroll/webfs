@@ -1,7 +1,7 @@
 package webref
 
-import "errors"
+import "github.com/brendoncarroll/webfs/pkg/stores"
 
 var (
-	ErrMaxSizeExceeded = errors.New("MaxBlobSize exceeded")
+	ErrMaxSizeExceeded = stores.ErrMaxSizeExceeded
 )

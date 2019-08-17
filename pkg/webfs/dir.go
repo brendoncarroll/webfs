@@ -3,6 +3,7 @@ package webfs
 import (
 	"context"
 	"errors"
+	"log"
 	"strings"
 
 	"github.com/brendoncarroll/webfs/pkg/stores"
@@ -24,6 +25,9 @@ type Dir struct {
 }
 
 func newDir(ctx context.Context, parent Object, name string) (*Dir, error) {
+	if parent == nil {
+		return nil, errors.New("dir must have parent")
+	}
 	dir := &Dir{
 		baseObject: baseObject{
 			parent:       parent,
@@ -164,14 +168,13 @@ func (d *Dir) String() string {
 	return "Object{Dir}"
 }
 
-// func (d *Dir) split(ctx context.Context, s ReadWriteOnce) error {
-// 	newTree, err := d.m.Tree.Split(ctx, s)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	d.m = models.Dir{Tree: newTree}
-// 	return nil
-// }
+func (d *Dir) dirSplit(ctx context.Context, s stores.ReadWriteOnce, opts webref.Options, x models.Dir) (*models.Dir, error) {
+	newTree, err := x.Tree.Split(ctx, s, opts)
+	if err != nil {
+		return nil, err
+	}
+	return &models.Dir{Tree: newTree}, nil
+}
 
 func (d *Dir) put(ctx context.Context, name string, fn ObjectMutator) error {
 	store := d.getStore()
@@ -211,6 +214,7 @@ func (d *Dir) apply(ctx context.Context, fn DirMutator) error {
 			return x.put(ctx, d.nameInParent, fn)
 		}
 	default:
+		log.Printf("value: %v type: %T\n", d.parent, d.parent)
 		panic("invalid parent")
 	}
 
@@ -266,10 +270,25 @@ func dirPut(ctx context.Context, store stores.ReadWriteOnce, opts webref.Options
 		return nil, errors.New("directory name contains a slash")
 	}
 
-	ref, err := webref.Store(ctx, store, opts, &ent)
-	if err != nil {
-		return nil, err
+	var (
+		ref *webref.Ref
+		err error
+	)
+	for {
+		ref, err = webref.Store(ctx, store, opts, &ent)
+		if err == webref.ErrMaxSizeExceeded {
+			ent, err = dirEntSplit(ctx, store, opts, ent)
+			if err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		break
 	}
+
 	key := []byte(ent.Name)
 	tree, err := m.Tree.Put(ctx, store, opts, key, ref)
 	if err != nil {
@@ -285,4 +304,20 @@ func dirDelete(ctx context.Context, store stores.ReadWriteOnce, opts webref.Opti
 		return nil, err
 	}
 	return &models.Dir{Tree: newTree}, nil
+}
+
+func dirSplit(ctx context.Context, store stores.ReadWriteOnce, opts webref.Options, x models.Dir) (*models.Dir, error) {
+	newTree, err := x.Tree.Split(ctx, store, opts)
+	if err != nil {
+		return nil, err
+	}
+	return &models.Dir{Tree: newTree}, nil
+}
+
+func dirEntSplit(ctx context.Context, store stores.ReadWriteOnce, opts webref.Options, x models.DirEntry) (models.DirEntry, error) {
+	o2, err := objectSplit(ctx, store, opts, *x.Object)
+	if err != nil {
+		return models.DirEntry{}, nil
+	}
+	return models.DirEntry{Object: o2, Name: x.Name}, nil
 }

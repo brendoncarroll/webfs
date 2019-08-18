@@ -39,12 +39,16 @@ func (f *File) SetData(ctx context.Context, r io.Reader) error {
 	if r == nil {
 		r = &bytes.Buffer{}
 	}
-	m := &models.File{Tree: wrds.NewTree()}
+
+	store := f.getStore()
+	opts := *f.getOptions().DataOpts
 	buf := make([]byte, f.getStore().MaxBlobSize())
 	if len(buf) == 0 {
 		panic("max blob size 0")
 	}
 
+	size := uint64(0)
+	tb := wrds.NewTreeBuilder()
 	for {
 		n, err := r.Read(buf)
 		if err == io.EOF {
@@ -54,10 +58,27 @@ func (f *File) SetData(ctx context.Context, r io.Reader) error {
 			return err
 		}
 		data := buf[:n]
-		m, err = fileAppend(ctx, f.getStore(), *f.getOptions().DataOpts, *m, data)
+
+		ref, err := webref.Post(ctx, store, opts, data)
 		if err != nil {
 			return err
 		}
+		ent := &wrds.TreeEntry{
+			Key: offset2Key(size),
+			Ref: ref,
+		}
+		if err = tb.Put(ctx, store, opts, ent); err != nil {
+			return err
+		}
+		size += uint64(n)
+	}
+	tree, err := tb.Finish(ctx, store, opts)
+	if err != nil {
+		return err
+	}
+	m := &models.File{
+		Tree: tree,
+		Size: size,
 	}
 
 	// This is a total replace not a modification of existing content.

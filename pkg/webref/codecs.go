@@ -52,11 +52,20 @@ func Store(ctx context.Context, s stores.WriteOnce, opts Options, x interface{})
 
 func SizeOf(s stores.WriteOnce, o Options, x interface{}) int {
 	codec := o.Attrs["codec"]
-	data, err := Encode(codec, x)
-	if err != nil {
-		panic(err)
+	switch codec {
+	case CodecProtobuf:
+		pm, ok := x.(proto.Message)
+		if !ok {
+			panic("can't use protobuf encoding with non proto.Message")
+		}
+		return proto.Size(pm)
+	default:
+		data, err := Encode(codec, x)
+		if err != nil {
+			panic(err)
+		}
+		return len(data)
 	}
-	return len(data)
 }
 
 func Encode(codec string, x interface{}) (data []byte, err error) {

@@ -44,6 +44,7 @@ message Options {
     EncAlgo enc_algo = 1;
     bytes secret_seed = 2;
     bool obfuscate_length = 3;
+
     map<string, int32> replicas = 4;
     map<string, string> attrs = 5;
 }

@@ -5,8 +5,10 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/rand"
 	"errors"
 	fmt "fmt"
+	"math/bits"
 
 	"golang.org/x/crypto/sha3"
 
@@ -18,8 +20,17 @@ import (
 func PostCrypto(ctx context.Context, s stores.WriteOnce, prefix string, data []byte, o Options) (*CryptoRef, error) {
 	secret := generateSecret(data, o.SecretSeed)
 
-	ctext := make([]byte, len(data))
+	ctextLen := len(data)
+	if o.ObfuscateLength {
+		ctextLen = obfuscatedLength(len(data))
+	}
+
+	ctext := make([]byte, ctextLen)
 	if err := crypt(o.EncAlgo, secret, data, ctext); err != nil {
+		return nil, err
+	}
+
+	if _, err := rand.Read(ctext[len(data):]); err != nil {
 		return nil, err
 	}
 
@@ -31,7 +42,7 @@ func PostCrypto(ctx context.Context, s stores.WriteOnce, prefix string, data []b
 		EncAlgo: o.EncAlgo,
 		Dek:     secret,
 		Url:     string(key),
-		Length:  int32(len(ctext)),
+		Length:  int32(len(data)),
 	}, nil
 }
 
@@ -88,4 +99,15 @@ func generateSecret(seed, data []byte) []byte {
 
 	y := sha3.Sum256(x)
 	return y[:]
+}
+
+func obfuscatedLength(x int) int {
+	if x == 0 {
+		return 0
+	}
+	l := bits.Len(uint(x))
+	if bits.OnesCount(uint(x)) == 1 {
+		l--
+	}
+	return 1 << uint(l)
 }

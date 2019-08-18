@@ -20,12 +20,21 @@ import (
 var ctx = context.TODO()
 
 func getTestFS() *WebFS {
-	ms := stores.NewMemStore()
+	ms := stores.NewMemStore(4096)
 	mc := cells.Make(memcell.Spec{})
 	wfs, err := New(mc, ms)
 	if err != nil {
 		panic(err)
 	}
+
+	objs, err := wfs.Find(ctx, "")
+	if err != nil {
+		panic(err)
+	}
+	objs[0].(*Volume).ChangeOptions(ctx, func(x *Options) *Options {
+		x.DataOpts.Replicas[""] = 1
+		return x
+	})
 	return wfs
 }
 

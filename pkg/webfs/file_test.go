@@ -17,7 +17,7 @@ func TestFileAppend(t *testing.T) {
 	opts := webref.DefaultOptions()
 	opts.Replicas[""] = 1
 
-	store := stores.NewMemStore()
+	store := stores.NewMemStore(4096)
 	f := &models.File{Tree: wrds.NewTree()}
 
 	testData := []string{

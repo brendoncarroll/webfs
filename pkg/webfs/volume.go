@@ -77,6 +77,15 @@ func (v *Volume) Walk(ctx context.Context, f func(Object) bool) (bool, error) {
 	return o.Walk(ctx, f)
 }
 
+func (v *Volume) ChangeOptions(ctx context.Context, fn func(x *Options) *Options) error {
+	v.apply(ctx, func(cx models.Commit) (*models.Commit, error) {
+		yx := cx
+		yx.Options = fn(cx.Options)
+		return &yx, nil
+	})
+	return nil
+}
+
 func (v *Volume) Get(ctx context.Context) (*models.Commit, error) {
 	return v.get(ctx)
 }

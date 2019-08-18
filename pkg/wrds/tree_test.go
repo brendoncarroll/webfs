@@ -29,8 +29,8 @@ func TestIndexOf(t *testing.T) {
 }
 
 func TestPutGet(t *testing.T) {
-	const N = 10
-	s := stores.NewMemStore()
+	const N = 1000
+	s := stores.NewMemStore(4096)
 	opts := *webref.DefaultOptions()
 
 	tree := NewTree()

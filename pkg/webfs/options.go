@@ -10,7 +10,6 @@ type Options = models.Options
 
 func DefaultOptions() *Options {
 	dataOpts := webref.DefaultOptions()
-	dataOpts.Replicas["ipfs://"] = 1
 
 	return &Options{
 		DataOpts: dataOpts,
@@ -36,6 +35,7 @@ func MergeOptions(options ...*Options) *Options {
 		if len(o.StoreSpecs) > 0 {
 			ret.StoreSpecs = o.StoreSpecs
 		}
+		ret.DataOpts = o.DataOpts
 	}
 	return ret
 }

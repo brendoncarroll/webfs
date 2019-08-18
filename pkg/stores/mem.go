@@ -9,19 +9,23 @@ import (
 )
 
 type MemStore struct {
-	m sync.Map
+	m           sync.Map
+	maxBlobSize int
 }
 
-func NewMemStore() *MemStore {
-	return &MemStore{}
+func NewMemStore(maxBlobSize int) *MemStore {
+	return &MemStore{
+		maxBlobSize: maxBlobSize,
+	}
 }
 
 func (s *MemStore) Post(ctx context.Context, prefix string, data []byte) (string, error) {
-	dataStr := string(data)
+	data2 := make([]byte, len(data))
+	copy(data2, data)
 
 	h := sha3.Sum256(data)
 	key := prefix + base64.URLEncoding.EncodeToString(h[:])
-	s.m.Store(key, dataStr)
+	s.m.Store(key, data2)
 	return key, nil
 }
 
@@ -30,9 +34,12 @@ func (s *MemStore) Get(ctx context.Context, key string) ([]byte, error) {
 	if !exists {
 		return nil, nil
 	}
-	return []byte(x.(string)), nil
+	x2 := x.([]byte)
+	data := make([]byte, len(x2))
+	copy(data, x2)
+	return data, nil
 }
 
 func (s *MemStore) MaxBlobSize() int {
-	return 1 << 16
+	return s.maxBlobSize
 }

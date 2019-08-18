@@ -12,6 +12,9 @@ import (
 
 func PostRepPack(ctx context.Context, store stores.WriteOnce, o Options, data []byte) (*RepPackRef, error) {
 	refs := []*RepPackRef{}
+	if len(o.Replicas) == 0 {
+		return nil, fmt.Errorf("no prefixes to post to")
+	}
 	for k, v := range o.Replicas {
 		for i := 0; i < int(v); i++ {
 			prefix := k

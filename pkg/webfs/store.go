@@ -8,7 +8,7 @@ import (
 	"github.com/brendoncarroll/webfs/pkg/stores"
 	"github.com/brendoncarroll/webfs/pkg/webfs/models"
 
-	"github.com/brendoncarroll/webfs/pkg/stores/cahttp"
+	"github.com/brendoncarroll/webfs/pkg/stores/httpstore"
 	"github.com/brendoncarroll/webfs/pkg/stores/ipfsstore"
 )
 
@@ -18,14 +18,18 @@ type Store struct {
 }
 
 func newStore(parent *Store, specs []*models.StoreSpec) (*Store, error) {
+	var err error
 	routes := make([]stores.StoreRoute, len(specs))
 	for i, spec := range specs {
 		var s stores.ReadWriteOnce
 		switch x := spec.Spec.(type) {
-		case *models.StoreSpec_Cahttp:
-			s = cahttp.New(x.Cahttp.Endpoint, x.Cahttp.Prefix)
+		case *models.StoreSpec_Http:
+			s = httpstore.New(x.Http.Endpoint, x.Http.Prefix)
 		case *models.StoreSpec_Ipfs:
-			s = ipfsstore.New(x.Ipfs.Endpoint)
+			s, err = ipfsstore.New(x.Ipfs.Endpoint)
+			if err != nil {
+				return nil, err
+			}
 		default:
 			return nil, fmt.Errorf("bad spec %v", spec)
 		}
@@ -79,5 +83,19 @@ func (s *Store) MaxBlobSize() int {
 	if x == 0 && s.parent != nil {
 		return s.parent.MaxBlobSize()
 	}
-	return x
+	if s.parent == nil {
+		return x
+	}
+	parentMbs := s.parent.MaxBlobSize()
+	if parentMbs == 0 {
+		return x
+	}
+	return min(x, parentMbs)
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

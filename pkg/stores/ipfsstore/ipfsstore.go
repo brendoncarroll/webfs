@@ -3,45 +3,74 @@ package ipfsstore
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log"
 	"strings"
 
+	"github.com/brendoncarroll/webfs/pkg/stores"
 	ipfsapi "github.com/ipfs/go-ipfs-api"
 )
 
-const MaxBlobSize = 1 << 20 // 1MiB
+const (
+	MaxBlobSize = 1 << 20 // 1MiB
 
-type IPFSStore struct {
-	client *ipfsapi.Shell
-}
+	DefaultMHType = "sha2-256"
+	DefaultMHLen  = 32
 
-func New(url string) *IPFSStore {
-	return &IPFSStore{
-		client: ipfsapi.NewShell(url),
+	OfficialGatewayURL = "https://ipfs.io/"
+	DefaultLocalURL    = "http://127.0.0.1:5001"
+
+	urlPrefix = "ipfs://"
+)
+
+type IPFSStore = stores.ReadWriteOnce
+
+func New(url string) (IPFSStore, error) {
+	if url == "" {
+		url = DefaultLocalURL
 	}
+	urls := []string{
+		url,
+		OfficialGatewayURL,
+	}
+	for _, u := range urls {
+		client := ipfsapi.NewShell(url)
+		if !client.IsUp() {
+			log.Printf("ipfsstore: %s is down\n", u)
+		}
+		return &ipfsGateway{
+			client: client,
+		}, nil
+	}
+	return nil, fmt.Errorf("no available ipfs gateway")
 }
 
-func (s *IPFSStore) Get(ctx context.Context, key string) ([]byte, error) {
-	const urlPrefix = "ipfs://"
+type ipfsGateway struct {
+	isLocal bool
+	client  *ipfsapi.Shell
+}
+
+func (s *ipfsGateway) Get(ctx context.Context, key string) ([]byte, error) {
 	if !strings.HasPrefix(key, urlPrefix) {
 		return nil, errors.New("Invalid key: " + key)
 	}
-	p := "ipfs/" + key[len(urlPrefix):]
+	p := key[len(urlPrefix):]
 	return s.client.BlockGet(p)
 }
 
-func (s *IPFSStore) Post(ctx context.Context, key string, data []byte) (string, error) {
+func (s *ipfsGateway) Post(ctx context.Context, key string, data []byte) (string, error) {
 	var (
 		format = ""
-		mhtype = ""
-		mhlen  = 0
+		mhtype = DefaultMHType
+		mhlen  = DefaultMHLen
 	)
 	k, err := s.client.BlockPut(data, format, mhtype, mhlen)
 	if err != nil {
 		return "", err
 	}
-	return k, nil
+	return urlPrefix + k, nil
 }
 
-func (s *IPFSStore) MaxBlobSize() int {
+func (s *ipfsGateway) MaxBlobSize() int {
 	return MaxBlobSize
 }

@@ -18,7 +18,7 @@ var _ = math.Inf
 // proto package needs to be updated.
 const _ = proto.ProtoPackageIsVersion2 // please upgrade the proto package
 
-type CAHTTPSpec struct {
+type HTTPSpec struct {
 	Prefix               string   `protobuf:"bytes,1,opt,name=prefix,proto3" json:"prefix,omitempty"`
 	Endpoint             string   `protobuf:"bytes,2,opt,name=endpoint,proto3" json:"endpoint,omitempty"`
 	XXX_NoUnkeyedLiteral struct{} `json:"-"`
@@ -26,38 +26,38 @@ type CAHTTPSpec struct {
 	XXX_sizecache        int32    `json:"-"`
 }
 
-func (m *CAHTTPSpec) Reset()         { *m = CAHTTPSpec{} }
-func (m *CAHTTPSpec) String() string { return proto.CompactTextString(m) }
-func (*CAHTTPSpec) ProtoMessage()    {}
-func (*CAHTTPSpec) Descriptor() ([]byte, []int) {
-	return fileDescriptor_storespecs_bbe7ef5129a78f6e, []int{0}
+func (m *HTTPSpec) Reset()         { *m = HTTPSpec{} }
+func (m *HTTPSpec) String() string { return proto.CompactTextString(m) }
+func (*HTTPSpec) ProtoMessage()    {}
+func (*HTTPSpec) Descriptor() ([]byte, []int) {
+	return fileDescriptor_storespecs_a1dcccb75abd43df, []int{0}
 }
-func (m *CAHTTPSpec) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_CAHTTPSpec.Unmarshal(m, b)
+func (m *HTTPSpec) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_HTTPSpec.Unmarshal(m, b)
 }
-func (m *CAHTTPSpec) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_CAHTTPSpec.Marshal(b, m, deterministic)
+func (m *HTTPSpec) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_HTTPSpec.Marshal(b, m, deterministic)
 }
-func (dst *CAHTTPSpec) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_CAHTTPSpec.Merge(dst, src)
+func (dst *HTTPSpec) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_HTTPSpec.Merge(dst, src)
 }
-func (m *CAHTTPSpec) XXX_Size() int {
-	return xxx_messageInfo_CAHTTPSpec.Size(m)
+func (m *HTTPSpec) XXX_Size() int {
+	return xxx_messageInfo_HTTPSpec.Size(m)
 }
-func (m *CAHTTPSpec) XXX_DiscardUnknown() {
-	xxx_messageInfo_CAHTTPSpec.DiscardUnknown(m)
+func (m *HTTPSpec) XXX_DiscardUnknown() {
+	xxx_messageInfo_HTTPSpec.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_CAHTTPSpec proto.InternalMessageInfo
+var xxx_messageInfo_HTTPSpec proto.InternalMessageInfo
 
-func (m *CAHTTPSpec) GetPrefix() string {
+func (m *HTTPSpec) GetPrefix() string {
 	if m != nil {
 		return m.Prefix
 	}
 	return ""
 }
 
-func (m *CAHTTPSpec) GetEndpoint() string {
+func (m *HTTPSpec) GetEndpoint() string {
 	if m != nil {
 		return m.Endpoint
 	}
@@ -75,7 +75,7 @@ func (m *IPFSSpec) Reset()         { *m = IPFSSpec{} }
 func (m *IPFSSpec) String() string { return proto.CompactTextString(m) }
 func (*IPFSSpec) ProtoMessage()    {}
 func (*IPFSSpec) Descriptor() ([]byte, []int) {
-	return fileDescriptor_storespecs_bbe7ef5129a78f6e, []int{1}
+	return fileDescriptor_storespecs_a1dcccb75abd43df, []int{1}
 }
 func (m *IPFSSpec) XXX_Unmarshal(b []byte) error {
 	return xxx_messageInfo_IPFSSpec.Unmarshal(m, b)
@@ -103,21 +103,20 @@ func (m *IPFSSpec) GetEndpoint() string {
 }
 
 func init() {
-	proto.RegisterType((*CAHTTPSpec)(nil), "webfs.CAHTTPSpec")
+	proto.RegisterType((*HTTPSpec)(nil), "webfs.HTTPSpec")
 	proto.RegisterType((*IPFSSpec)(nil), "webfs.IPFSSpec")
 }
 
-func init() { proto.RegisterFile("storespecs.proto", fileDescriptor_storespecs_bbe7ef5129a78f6e) }
+func init() { proto.RegisterFile("storespecs.proto", fileDescriptor_storespecs_a1dcccb75abd43df) }
 
-var fileDescriptor_storespecs_bbe7ef5129a78f6e = []byte{
-	// 130 bytes of a gzipped FileDescriptorProto
+var fileDescriptor_storespecs_a1dcccb75abd43df = []byte{
+	// 128 bytes of a gzipped FileDescriptorProto
 	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xe2, 0x12, 0x28, 0x2e, 0xc9, 0x2f,
 	0x4a, 0x2d, 0x2e, 0x48, 0x4d, 0x2e, 0xd6, 0x2b, 0x28, 0xca, 0x2f, 0xc9, 0x17, 0x62, 0x2d, 0x4f,
-	0x4d, 0x4a, 0x2b, 0x56, 0x72, 0xe0, 0xe2, 0x72, 0x76, 0xf4, 0x08, 0x09, 0x09, 0x08, 0x2e, 0x48,
-	0x4d, 0x16, 0x12, 0xe3, 0x62, 0x2b, 0x28, 0x4a, 0x4d, 0xcb, 0xac, 0x90, 0x60, 0x54, 0x60, 0xd4,
-	0xe0, 0x0c, 0x82, 0xf2, 0x84, 0xa4, 0xb8, 0x38, 0x52, 0xf3, 0x52, 0x0a, 0xf2, 0x33, 0xf3, 0x4a,
-	0x24, 0x98, 0xc0, 0x32, 0x70, 0xbe, 0x92, 0x1a, 0x17, 0x87, 0x67, 0x80, 0x5b, 0x30, 0x58, 0x3f,
-	0xb2, 0x3a, 0x46, 0x54, 0x75, 0x4e, 0x1c, 0x51, 0x6c, 0xb9, 0xf9, 0x29, 0xa9, 0x39, 0xc5, 0x49,
-	0x6c, 0x60, 0x17, 0x18, 0x03, 0x02, 0x00, 0x00, 0xff, 0xff, 0xf3, 0x02, 0x6e, 0xc7, 0x95, 0x00,
-	0x00, 0x00,
+	0x4d, 0x4a, 0x2b, 0x56, 0xb2, 0xe3, 0xe2, 0xf0, 0x08, 0x09, 0x09, 0x08, 0x2e, 0x48, 0x4d, 0x16,
+	0x12, 0xe3, 0x62, 0x2b, 0x28, 0x4a, 0x4d, 0xcb, 0xac, 0x90, 0x60, 0x54, 0x60, 0xd4, 0xe0, 0x0c,
+	0x82, 0xf2, 0x84, 0xa4, 0xb8, 0x38, 0x52, 0xf3, 0x52, 0x0a, 0xf2, 0x33, 0xf3, 0x4a, 0x24, 0x98,
+	0xc0, 0x32, 0x70, 0xbe, 0x92, 0x1a, 0x17, 0x87, 0x67, 0x80, 0x5b, 0x30, 0x58, 0x3f, 0xb2, 0x3a,
+	0x46, 0x54, 0x75, 0x4e, 0x1c, 0x51, 0x6c, 0xb9, 0xf9, 0x29, 0xa9, 0x39, 0xc5, 0x49, 0x6c, 0x60,
+	0xfb, 0x8d, 0x01, 0x01, 0x00, 0x00, 0xff, 0xff, 0x94, 0xd6, 0xbd, 0xe0, 0x93, 0x00, 0x00, 0x00,
 }

@@ -2,15 +2,6 @@ package webref
 
 import "crypto/rand"
 
-// type Options struct {
-// 	EncAlgo           EncAlgo
-// 	SecretSeed        []byte
-// 	LengthObfuscation *bool
-
-// 	Replicas map[string]int
-// 	Codec    string
-// }
-
 // func MergeOptions(opts []Options) Options {
 // 	o := opts[0]
 // 	for i := range opts[1:] {
@@ -42,13 +33,11 @@ func DefaultOptions() *Options {
 	}
 	return &Options{
 		Attrs: map[string]string{
-			"codec": CodecJSON,
+			"codec": CodecProtobuf,
 		},
 		EncAlgo:         EncAlgo_CHACHA20,
 		SecretSeed:      secret[:],
 		ObfuscateLength: false,
-		Replicas: map[string]int32{
-			"bc://": 1,
-		},
+		Replicas:        map[string]int32{},
 	}
 }

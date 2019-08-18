@@ -3,7 +3,7 @@ syntax = "proto3";
 package webfs;
 option go_package = "models";
 
-message CAHTTPSpec {
+message HTTPSpec {
     string prefix = 1;
     string endpoint = 2;
 }

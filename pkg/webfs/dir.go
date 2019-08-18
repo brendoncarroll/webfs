@@ -78,6 +78,7 @@ func (d *Dir) Lookup(ctx context.Context, p Path) (Object, error) {
 
 func (d *Dir) Walk(ctx context.Context, f func(Object) bool) (bool, error) {
 	cont := f(d)
+
 	if !cont {
 		return cont, nil
 	}
@@ -103,9 +104,15 @@ func (d *Dir) Walk(ctx context.Context, f func(Object) bool) (bool, error) {
 		name := string(ent.Key)
 		o2, err := wrapObject(d, name, dirEnt.Object)
 		if err != nil {
-			return false, nil
+			return false, err
 		}
 		cont = f(o2)
+		if cont {
+			cont, err = o2.Walk(ctx, f)
+			if err != nil {
+				return false, err
+			}
+		}
 	}
 	return cont, nil
 }

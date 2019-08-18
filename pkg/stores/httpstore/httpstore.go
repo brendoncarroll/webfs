@@ -1,4 +1,4 @@
-package cahttp
+package httpstore
 
 import (
 	"bytes"
@@ -16,24 +16,24 @@ import (
 
 const MaxBlobSize = 1 << 16
 
-type CAHttpStore struct {
+type HttpStore struct {
 	endpoint    string
 	prefix      string
 	maxBlobSize int
 }
 
-func New(endpoint string, prefix string) *CAHttpStore {
+func New(endpoint string, prefix string) *HttpStore {
 	if len(endpoint) > 0 && endpoint[len(endpoint)-1] != '/' {
 		endpoint += "/"
 	}
-	return &CAHttpStore{
+	return &HttpStore{
 		endpoint:    endpoint,
 		maxBlobSize: MaxBlobSize,
 		prefix:      prefix,
 	}
 }
 
-func (hs *CAHttpStore) Get(ctx context.Context, key string) ([]byte, error) {
+func (hs *HttpStore) Get(ctx context.Context, key string) ([]byte, error) {
 	key2, err := hs.removePrefix(key)
 	if err != nil {
 		return nil, err
@@ -62,12 +62,12 @@ func (hs *CAHttpStore) Get(ctx context.Context, key string) ([]byte, error) {
 	return data, nil
 }
 
-func (hs *CAHttpStore) Check(ctx context.Context, key string) (bool, error) {
+func (hs *HttpStore) Check(ctx context.Context, key string) (bool, error) {
 	// TODO: http HEAD
 	return false, nil
 }
 
-func (hs *CAHttpStore) Post(ctx context.Context, prefix string, data []byte) (string, error) {
+func (hs *HttpStore) Post(ctx context.Context, prefix string, data []byte) (string, error) {
 	if len(data) > hs.maxBlobSize {
 		return "", stores.ErrMaxSizeExceeded
 	}
@@ -97,11 +97,11 @@ func (hs *CAHttpStore) Post(ctx context.Context, prefix string, data []byte) (st
 	return key, nil
 }
 
-func (hs *CAHttpStore) MaxBlobSize() int {
+func (hs *HttpStore) MaxBlobSize() int {
 	return hs.maxBlobSize
 }
 
-func (hs *CAHttpStore) removePrefix(x string) (string, error) {
+func (hs *HttpStore) removePrefix(x string) (string, error) {
 	if !strings.HasPrefix(x, hs.prefix) {
 		return "", errors.New("Wrong key: " + x)
 	}

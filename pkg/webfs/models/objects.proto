@@ -54,7 +54,7 @@ message StoreSpec {
     string prefix = 1;
 
     oneof spec {
-        CAHTTPSpec cahttp = 2;
+        HTTPSpec http = 2;
         IPFSSpec ipfs = 3;
     }
 }

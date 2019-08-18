@@ -15,6 +15,8 @@ import (
 func TestFileAppend(t *testing.T) {
 	ctx := context.TODO()
 	opts := webref.DefaultOptions()
+	opts.Replicas[""] = 1
+
 	store := stores.NewMemStore()
 	f := &models.File{Tree: wrds.NewTree()}
 

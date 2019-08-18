@@ -1,6 +1,7 @@
 package webfs
 
 import (
+	"github.com/brendoncarroll/webfs/pkg/stores/ipfsstore"
 	"github.com/brendoncarroll/webfs/pkg/webfs/models"
 	"github.com/brendoncarroll/webfs/pkg/webref"
 )
@@ -8,26 +9,20 @@ import (
 type Options = models.Options
 
 func DefaultOptions() *Options {
+	dataOpts := webref.DefaultOptions()
+	dataOpts.Replicas["ipfs://"] = 1
+
 	return &Options{
-		DataOpts:   webref.DefaultOptions(),
+		DataOpts: dataOpts,
 		StoreSpecs: []*models.StoreSpec{
-			// {
-			// 	Prefix: "bc://",
-			// 	Spec: &models.StoreSpec_Cahttp{
-			// 		Cahttp: &models.CAHTTPSpec{
-			// 			Endpoint: "http://127.0.0.1:6667/",
-			// 			Prefix:   "bc://",
-			// 		},
-			// 	},
-			// },
-			// {
-			// 	Prefix: "ipfs://",
-			// 	Spec: &models.StoreSpec_Ipfs{
-			// 		Ipfs: &models.IPFSSpec{
-			// 			Endpoint: "http://127.0.0.1:5001/",
-			// 		},
-			// 	},
-			// },
+			{
+				Prefix: "ipfs://",
+				Spec: &models.StoreSpec_Ipfs{
+					Ipfs: &models.IPFSSpec{
+						Endpoint: ipfsstore.DefaultLocalURL,
+					},
+				},
+			},
 		},
 	}
 }

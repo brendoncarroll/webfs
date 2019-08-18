@@ -42,11 +42,10 @@ func (t *Tree) Split(ctx context.Context, s WriteOnce, opts Options) (*Tree, err
 	newTree := &Tree{Level: t.Level + 1}
 
 	low, high := t.split()
-	subTrees := []Tree{low, high}
+	subTrees := []Tree{high, low}
 	for len(subTrees) > 0 {
-		// pop
-		st := subTrees[0]
-		subTrees = subTrees[1:]
+		st := subTrees[len(subTrees)-1]
+		subTrees = subTrees[:len(subTrees)-1]
 
 		ref, err := webref.Store(ctx, s, opts, &st)
 		if err == webref.ErrMaxSizeExceeded {
@@ -54,8 +53,7 @@ func (t *Tree) Split(ctx context.Context, s WriteOnce, opts Options) (*Tree, err
 				return nil, fmt.Errorf("cannot further split tree")
 			}
 			l2, h2 := st.split()
-			subTrees = append(subTrees, l2)
-			subTrees = append(subTrees, h2)
+			subTrees = append(subTrees, []Tree{h2, l2}...)
 			continue
 		}
 		if err != nil {
@@ -64,6 +62,12 @@ func (t *Tree) Split(ctx context.Context, s WriteOnce, opts Options) (*Tree, err
 
 		ent := &TreeEntry{Key: st.MinKey(), Ref: ref}
 		newTree.Entries = append(newTree.Entries, ent)
+	}
+
+	if sort.SliceIsSorted(newTree.Entries, func(i, j int) bool {
+		return bytes.Compare(newTree.Entries[i].Key, newTree.Entries[j].Key) < 0
+	}) {
+		panic("unsorted entries")
 	}
 
 	return newTree, nil

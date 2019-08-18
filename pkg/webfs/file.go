@@ -228,7 +228,7 @@ func refIterTree(ctx context.Context, store stores.Read, t *wrds.Tree, f func(we
 			return false, err
 		}
 		if entry == nil {
-			return false, nil
+			return true, nil
 		}
 		cont = f(*entry.Ref)
 	}

@@ -17,7 +17,7 @@ func DefaultOptions() *Options {
 			{
 				Prefix: "ipfs://",
 				Spec: &models.StoreSpec_Ipfs{
-					Ipfs: &models.IPFSSpec{
+					Ipfs: &models.IPFSStoreSpec{
 						Endpoint: ipfsstore.DefaultLocalURL,
 					},
 				},
@@ -32,6 +32,9 @@ func MergeOptions(options ...*Options) *Options {
 	ret := DefaultOptions()
 	for i := range options {
 		o := options[i]
+		if o == nil {
+			continue
+		}
 		if len(o.StoreSpecs) > 0 {
 			ret.StoreSpecs = o.StoreSpecs
 		}

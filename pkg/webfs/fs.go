@@ -185,7 +185,7 @@ func (wfs *WebFS) OpenFile(ctx context.Context, p string) (*FileHandle, error) {
 	return fh, nil
 }
 
-func (wfs *WebFS) Delete(ctx context.Context, p string) error {
+func (wfs *WebFS) Remove(ctx context.Context, p string) error {
 	dirp := path.Dir(p)
 	basep := path.Base(p)
 	if basep == p {
@@ -198,7 +198,7 @@ func (wfs *WebFS) Delete(ctx context.Context, p string) error {
 	}
 	d, ok := o.(*Dir)
 	if !ok {
-		return errors.New("cannot delete from non-dir parent")
+		return errors.New("cannot remove from non-dir parent")
 	}
 	return d.Delete(ctx, basep)
 }
@@ -228,7 +228,15 @@ func (wfs *WebFS) RefIter(ctx context.Context, f func(ref webref.Ref) bool) erro
 }
 
 func (wfs *WebFS) NewVolume(ctx context.Context, p string, spec models.VolumeSpec) error {
-	cell := cells.Make(spec)
+	var cell cells.Cell
+	switch x := spec.CellSpec.(type) {
+	case *models.VolumeSpec_Http:
+		spec2 := httpcell.Spec{
+			URL:        x.Http.Url,
+			AuthHeader: x.Http.AuthHeader,
+		}
+		cell = httpcell.New(spec2)
+	}
 	if cell == nil {
 		return errors.New("could not create cell")
 	}
@@ -237,15 +245,23 @@ func (wfs *WebFS) NewVolume(ctx context.Context, p string, spec models.VolumeSpe
 		return errors.New("could not access cell")
 	}
 
-	p2 := parsePath(p)
-	parent, err := wfs.lookupParent(ctx, p2)
+	v := models.Object{
+		Value: &models.Object_Volume{
+			Volume: &spec,
+		},
+	}
+	return wfs.putAt(ctx, parsePath(p), v)
+}
+
+func (wfs *WebFS) putAt(ctx context.Context, p Path, o models.Object) error {
+	parent, err := wfs.lookupParent(ctx, p)
 	if err != nil {
 		return err
 	}
 	name := ""
-	if len(p2) > 0 {
-		last := len(p2) - 1
-		name = p2[last]
+	if len(p) > 0 {
+		last := len(p) - 1
+		name = p[last]
 	}
 
 	var put func(context.Context, ObjectMutator) error
@@ -262,18 +278,13 @@ func (wfs *WebFS) NewVolume(ctx context.Context, p string, spec models.VolumeSpe
 	default:
 		panic("lookup returned file")
 	}
-
 	err = put(ctx, func(cur *models.Object) (*models.Object, error) {
-		return &models.Object{
-			Value: &models.Object_Volume{
-				Volume: &spec,
-			},
-		}, nil
+		if cur != nil {
+			return nil, errors.New("object already here")
+		}
+		return &o, nil
 	})
-	if err != nil {
-		return err
-	}
-	return nil
+	return err
 }
 
 func (wfs *WebFS) ListVolumes(ctx context.Context) ([]*Volume, error) {
@@ -307,10 +318,10 @@ func (wfs *WebFS) getCellBySpec(spec *models.VolumeSpec) (Cell, error) {
 	var newCell cells.Cell
 
 	switch x := spec.CellSpec.(type) {
-	case *models.VolumeSpec_Httpcell:
+	case *models.VolumeSpec_Http:
 		spec2 := httpcell.Spec{
-			URL:        x.Httpcell.Url,
-			AuthHeader: x.Httpcell.AuthHeader,
+			URL:        x.Http.Url,
+			AuthHeader: x.Http.AuthHeader,
 		}
 		newCell = httpcell.New(spec2)
 	default:

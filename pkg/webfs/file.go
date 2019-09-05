@@ -82,7 +82,7 @@ func (f *File) SetData(ctx context.Context, r io.Reader) error {
 	}
 
 	// This is a total replace not a modification of existing content.
-	return f.apply(ctx, func(cur models.File) (*models.File, error) {
+	return f.Apply(ctx, func(cur models.File) (*models.File, error) {
 		return m, nil
 	})
 }
@@ -112,6 +112,16 @@ func (f *File) ReadAt(p []byte, off int64) (n int, err error) {
 	return fileReadAt(ctx, f.getStore(), f.m, offset, p)
 }
 
+func (f *File) Append(p []byte) error {
+	ctx := context.TODO()
+	newFile, err := fileAppend(ctx, f.getStore(), *f.getOptions().DataOpts, f.m, p)
+	if err != nil {
+		return err
+	}
+	f.m = *newFile
+	return nil
+}
+
 func (f *File) Size() uint64 {
 	return f.m.Size
 }
@@ -124,7 +134,7 @@ func (f *File) RefIter(ctx context.Context, fn func(webref.Ref) bool) (bool, err
 	return refIterTree(ctx, f.getStore(), f.m.Tree, fn)
 }
 
-func (f *File) apply(ctx context.Context, fn FileMutator) error {
+func (f *File) Apply(ctx context.Context, fn FileMutator) error {
 	var (
 		newFile *models.File
 		err     error

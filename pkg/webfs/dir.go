@@ -34,7 +34,7 @@ func newDir(ctx context.Context, parent Object, name string) (*Dir, error) {
 			nameInParent: name,
 		},
 	}
-	err := dir.apply(ctx, func(ctx context.Context, cur *models.Dir) (*models.Dir, error) {
+	err := dir.Apply(ctx, func(ctx context.Context, cur *models.Dir) (*models.Dir, error) {
 		if cur != nil {
 			return nil, errors.New("already exists")
 		}
@@ -122,13 +122,13 @@ func (d *Dir) Get(ctx context.Context, name string) (*models.DirEntry, error) {
 }
 
 func (d *Dir) Put(ctx context.Context, ent models.DirEntry) error {
-	return d.apply(ctx, func(ctx context.Context, cur *models.Dir) (*models.Dir, error) {
+	return d.Apply(ctx, func(ctx context.Context, cur *models.Dir) (*models.Dir, error) {
 		return dirPut(ctx, d.getStore(), *d.getOptions().DataOpts, *cur, ent)
 	})
 }
 
 func (d *Dir) Delete(ctx context.Context, name string) error {
-	return d.apply(ctx, func(ctx context.Context, cur *models.Dir) (*models.Dir, error) {
+	return d.Apply(ctx, func(ctx context.Context, cur *models.Dir) (*models.Dir, error) {
 		return dirDelete(ctx, d.getStore(), *d.getOptions().DataOpts, *cur, name)
 	})
 }
@@ -186,7 +186,7 @@ func (d *Dir) dirSplit(ctx context.Context, s stores.ReadWriteOnce, opts webref.
 func (d *Dir) put(ctx context.Context, name string, fn ObjectMutator) error {
 	store := d.getStore()
 	opts := d.getOptions().DataOpts
-	return d.apply(ctx, func(ctx context.Context, cur *models.Dir) (*models.Dir, error) {
+	return d.Apply(ctx, func(ctx context.Context, cur *models.Dir) (*models.Dir, error) {
 		// get the entry at name
 		ent, err := dirGet(ctx, store, *cur, name)
 		if err != nil {
@@ -207,7 +207,7 @@ func (d *Dir) put(ctx context.Context, name string, fn ObjectMutator) error {
 	})
 }
 
-func (d *Dir) apply(ctx context.Context, fn DirMutator) error {
+func (d *Dir) Apply(ctx context.Context, fn DirMutator) error {
 	var (
 		put    func(context.Context, ObjectMutator) error
 		newDir *models.Dir

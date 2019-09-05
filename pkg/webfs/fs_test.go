@@ -11,8 +11,10 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	"github.com/brendoncarroll/webfs/pkg/cells"
+	"github.com/brendoncarroll/webfs/pkg/cells/httpcell"
 	"github.com/brendoncarroll/webfs/pkg/cells/memcell"
 	"github.com/brendoncarroll/webfs/pkg/stores"
+	"github.com/brendoncarroll/webfs/pkg/webfs/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -105,4 +107,49 @@ func TestFileWriteRead(t *testing.T) {
 		actual := sha3.Sum256(data)
 		assert.Equal(t, expected, actual)
 	}
+}
+
+func TestNewVolume(t *testing.T) {
+	mc := memcell.New()
+	ms := stores.NewMemStore(4096)
+	cellServer := httpcell.NewServer()
+	cellName := "cell1"
+
+	go func() {
+		if err := cellServer.Serve(ctx, "127.0.0.1:"); err != nil {
+			t.Log(err)
+		}
+	}()
+
+	spec := cellServer.CreateCell(cellName)
+
+	wfs, err := New(mc, ms)
+	require.Nil(t, err)
+	objs, err := wfs.Find(ctx, "")
+	require.Nil(t, err)
+	objs[0].(*Volume).ChangeOptions(ctx, func(x *Options) *Options {
+		x.DataOpts.Replicas[""] = 1
+		return x
+	})
+
+	p := "/testvol"
+	vs := models.VolumeSpec{
+		CellSpec: &models.VolumeSpec_Http{&models.HTTPCellSpec{
+			Url: spec.URL,
+		}},
+	}
+	err = wfs.Mkdir(ctx, "")
+	require.Nil(t, err)
+	err = wfs.NewVolume(ctx, p, vs)
+	require.Nil(t, err)
+
+	objs, err = wfs.Find(ctx, p)
+	require.Nil(t, err)
+	assert.Len(t, objs, 1)
+
+	err = wfs.Mkdir(ctx, "/testvol")
+	require.Nil(t, err)
+	ents, err := wfs.Ls(ctx, "/testvol")
+	require.Nil(t, err)
+	assert.Len(t, ents, 0)
 }

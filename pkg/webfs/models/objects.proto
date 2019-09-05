@@ -32,8 +32,9 @@ message DirEntry {
 }
 
 message VolumeSpec {
+    string id = 1;
     oneof cell_spec {
-        HTTPCellSpec httpcell = 1;
+        HTTPCellSpec http = 2;
     }
 }
 
@@ -54,7 +55,7 @@ message StoreSpec {
     string prefix = 1;
 
     oneof spec {
-        HTTPSpec http = 2;
-        IPFSSpec ipfs = 3;
+        HTTPStoreSpec http = 2;
+        IPFSStoreSpec ipfs = 3;
     }
 }

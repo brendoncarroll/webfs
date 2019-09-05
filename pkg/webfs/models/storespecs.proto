@@ -3,11 +3,11 @@ syntax = "proto3";
 package webfs;
 option go_package = "models";
 
-message HTTPSpec {
+message HTTPStoreSpec {
     string prefix = 1;
     string endpoint = 2;
 }
 
-message IPFSSpec {
+message IPFSStoreSpec {
     string endpoint = 1;
 }

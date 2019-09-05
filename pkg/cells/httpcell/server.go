@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"net"
@@ -14,34 +15,44 @@ import (
 )
 
 type Server struct {
-	mu sync.Mutex
-	cs map[string][]byte
+	mu        sync.Mutex
+	setupWait sync.WaitGroup
+	cs        map[string][]byte
+	l         net.Listener
 }
 
 func NewServer() *Server {
-	return &Server{
-		cs: map[string][]byte{},
+	s := &Server{
+		cs:        map[string][]byte{},
+		setupWait: sync.WaitGroup{},
 	}
+	s.setupWait.Add(1)
+	return s
 }
 
-func (s *Server) Serve(ctx context.Context, addr string) error {
-	l, err := net.Listen("tcp", addr)
+func (s *Server) Serve(ctx context.Context, laddr string) (err error) {
+	s.l, err = net.Listen("tcp", laddr)
 	if err != nil {
 		return err
 	}
+	s.setupWait.Done()
+
 	go func() {
 		<-ctx.Done()
-		if err := l.Close(); err != nil {
+		if err := s.l.Close(); err != nil {
 			log.Println(err)
 		}
 	}()
-	return http.Serve(l, s)
+	return http.Serve(s.l, s)
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p := r.URL.Path
-	c, exists := s.cs[p]
+	if len(p) > 0 && p[0] == '/' {
+		p = p[1:]
+	}
 
+	c, exists := s.cs[p]
 	if r.Method != http.MethodPost && !exists {
 		w.WriteHeader(http.StatusNotFound)
 		return
@@ -94,6 +105,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.WriteHeader(http.StatusBadRequest)
 	}
+}
+
+func (s *Server) URL() string {
+	s.setupWait.Wait()
+	return fmt.Sprintf("http://%s/", s.l.Addr())
+}
+
+func (s *Server) CreateCell(name string) Spec {
+	s.newCell(name)
+	return Spec{URL: s.URL() + name}
 }
 
 func (s *Server) newCell(p string) {

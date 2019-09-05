@@ -4,47 +4,52 @@ WebFS is a filesystem built on top of the web.
 
 This project started after looking for a way to use IPFS as a Dropbox replacement,
 and not finding any really solid solutions.  I also wanted to be able to fluidly move
-my data between paid storage providers like Dropbox, MEGA, or Google Drive while testing the waters of exciting new p2p storage systems.
+my data between traditional storage providers like Dropbox, MEGA, or Google Drive while testing the waters of new p2p storage systems, like Swarm or Filecoin.
 
-The design is broken up into layers.
-Although it is possible for all these components to be arbitrarily stacked, there turns out to
-be very good reasons to stack them in a certain way, hence the numbering.
+If you have ever thought "x can probably be used as a file system", but didn't want to actually write the file system part, WebFS might be of benefit to you.
+You can probably turn x into a file system with WebFS by writing a new `Store` or `Cell` implementation.
 
-## L0 - Content Adressed Blobs
-This is the interface WebFS expects underneath it.  This is where the storage economy exists, it is comprised of:
-- Self interested nodes part of Filecoin, or Swarm.
-- Altrusitic nodes in Bittorrent, IPFS, or Freenet
-- Paid Storage e.g. MEGA, Dropbox, etc.
-- Social Favors e.g. a friend hosts SFTP on an old box; your public key is allowed.
+## Examples
+There are examples in the `/examples` directory.
+The examples assume you have the `webfs` executable on your `$PATH`.
 
-These entities should really task themselves with one thing. Serve up content addressed blobs quickly.  You give them a hash, they give you a blob.  Maybe you settle up cash after/before.
+You can also use
+```go run ../../cmd/webfs``` instead of ```webfs``` if you don't want to set that up.
 
-References to data are stored as URLs.  It is up to the schema handler for the URL to determine how the content addressing works.  With IPFS it's multihash, with Dropbox, or FTP it could just be naming the files as the SHA3 and checking you got what you asked for.
+## Architecture
+WebFS depends on two interfaces: `Stores` and `Cells`.
 
-## L1 - Crypto
-This is the first layer of WebFS. Storage providers should not be able to scan through blobs and learn anything useful.
-The structure of the blobs and their relation to other blobs should only be known to the requester, not the provider.
+### Stores
+Stores support two operations:
+```
+Get(key string) (data []byte, err error)
+Post(prefix string, data []byte) (key string, err error)
+```
+Stores must guarantee fidelity of the data.
+The key given by the store should be related to the data cryptographically.
+For example, an FTP server would make a fine store, provided the files are named with the hash of their contents.
+IPFS paths provide this guarentee.
 
-Public data is encrypted convergently, everything else is encrypted with a random key.  The random key and the encryption algorithm are included in a "L1 Ref". The next layer deals in `l1.Ref`s instead of URLs.
+### Cells
+Cells in WebFS are like cells in a spreadsheet, a single piece of data that can change over time.
+The compare-and-swap operation (`CAS(current, next)`) allows writes which will be synchronized with other WebFS instances writing to the same cell.
 
-## L2 - Replication / Packing
-This layer deals with mirroring, erasure coding, and packing. Anything that can take one blob and make many, or cram many into one.
-This layer will probably be passthrough for many usecases, some might use mirroring.
-Compression through packing, and packing for RAID5 or Reed Solomon are lower priority right now.
+Cells provide two operations:
+```
+Get() (data []byte, err error)
+CAS(current, next []byte) (success bool, err error)
+```
 
-## L3 - Merkle Data Structures
-In order to index many blobs we use a btree similar to real filesystems operating on block devices.
-This allows us to have large directories and most importantly a file abstraction, so you are not constrained to the maximum blob size of the storage layer.
-
-## L4 - WebFS Objects
+### Data Model
 WebFS takes a typical copy-on-write merkle tree approach similar to git or IPFS.  There are 3 objects that make up the data model.
+
 - Files.  Just a btree from file offsets to data.
 - Directories. A btree from strings to other WebFS objects.
-- Cells. An authority on part of the file system. The contents of cells are mutable and they can contain any other WebFS object.  Cells will be invisible to a client of the file system.
+- Volumes. An authority on part of the file system.
+The contents of volumes are mutable and they can contain any other WebFS object.
+Volumes will be invisible to a client of the file system, and can only be manipulated with the WebFS tooling.
+A Volume wraps a cell implementation.
 
-WebFS gets everything it needs from a config file called the "superblock".
-The superblock contains a representation of the `RootCell`, which contains a reference to a directory or another cell.
-There are many possible implementations of a cell, so the cell inside the root cell could have a networked implementation and everything below it is synced with a server, or a p2p consensus mechanism.
-
-Without any other cells all writes would propagate to the root.
-This is like git; it gives a globally consistent view of the entire tree.
+All of the configuration in WebFS is modelled as objects in the file system.
+Everything needed to start a WebFS instance is contained a file called the "superblock".
+The superblock is just a `Cell` implemented as a single file on disk.

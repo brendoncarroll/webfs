@@ -16,7 +16,7 @@ func TestHttpCell(t *testing.T) {
 
 	server := NewServer()
 	go server.Serve(ctx, addr)
-	server.newCell("/cell1")
+	server.newCell("cell1")
 
 	u := "http://" + addr + "/cell1"
 	cell := New(Spec{URL: u})

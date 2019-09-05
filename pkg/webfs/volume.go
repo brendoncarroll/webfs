@@ -19,6 +19,7 @@ type VolumeMutator func(models.Commit) (*models.Commit, error)
 type ObjectMutator func(*models.Object) (*models.Object, error)
 
 type Volume struct {
+	uid  string
 	cell Cell
 	opts *Options
 
@@ -78,7 +79,7 @@ func (v *Volume) Walk(ctx context.Context, f func(Object) bool) (bool, error) {
 }
 
 func (v *Volume) ChangeOptions(ctx context.Context, fn func(x *Options) *Options) error {
-	v.apply(ctx, func(cx models.Commit) (*models.Commit, error) {
+	v.Apply(ctx, func(cx models.Commit) (*models.Commit, error) {
 		yx := cx
 		yx.Options = fn(cx.Options)
 		return &yx, nil
@@ -126,7 +127,7 @@ func (v *Volume) getObject(ctx context.Context) (Object, error) {
 }
 
 func (v *Volume) put(ctx context.Context, fn ObjectMutator) error {
-	return v.apply(ctx, func(cur models.Commit) (*models.Commit, error) {
+	return v.Apply(ctx, func(cur models.Commit) (*models.Commit, error) {
 		var o *models.Object
 		if cur.ObjectRef != nil {
 			o = &models.Object{}
@@ -154,7 +155,7 @@ func (v *Volume) put(ctx context.Context, fn ObjectMutator) error {
 	})
 }
 
-func (v *Volume) apply(ctx context.Context, f VolumeMutator) error {
+func (v *Volume) Apply(ctx context.Context, f VolumeMutator) error {
 	const maxRetries = 10
 	success := false
 	for i := 0; !success && i < maxRetries; i++ {
@@ -245,7 +246,7 @@ func (v *Volume) getOptions() *Options {
 }
 
 func (v *Volume) init(ctx context.Context) error {
-	err := v.apply(ctx, func(x models.Commit) (*models.Commit, error) {
+	err := v.Apply(ctx, func(x models.Commit) (*models.Commit, error) {
 		y := x
 		if y.Options == nil {
 			y.Options = DefaultOptions()

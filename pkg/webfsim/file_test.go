@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/brendoncarroll/webfs/pkg/stores"
 	"github.com/brendoncarroll/webfs/pkg/webref"
 	"github.com/brendoncarroll/webfs/pkg/wrds"
 	"github.com/stretchr/testify/assert"
@@ -13,10 +12,8 @@ import (
 
 func TestFileAppend(t *testing.T) {
 	ctx := context.TODO()
-	opts := webref.DefaultOptions()
-	opts.Replicas[""] = 1
 
-	store := stores.NewMemStore(4096)
+	store := webref.NewMemStore(4096)
 	f := &File{Tree: wrds.NewTree()}
 
 	testData := []string{
@@ -31,7 +28,7 @@ func TestFileAppend(t *testing.T) {
 	)
 	for _, s := range testData {
 		d := []byte(s)
-		f, err = FileAppend(ctx, store, *opts, *f, d)
+		f, err = FileAppend(ctx, store, *f, d)
 		n += len(d)
 		require.Nil(t, err)
 	}

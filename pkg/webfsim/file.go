@@ -6,35 +6,33 @@ import (
 	"errors"
 	"io"
 
-	"github.com/brendoncarroll/webfs/pkg/stores"
-	webref "github.com/brendoncarroll/webfs/pkg/webref"
 	wrds "github.com/brendoncarroll/webfs/pkg/wrds"
 )
 
-func FileFromReader(ctx context.Context, s stores.ReadPost, opts webref.Options, r io.Reader) (*File, error) {
+func FileFromReader(ctx context.Context, s ReadPost, r io.Reader) (*File, error) {
 	buf := make([]byte, s.MaxBlobSize())
 	if len(buf) == 0 {
 		panic("max blob size 0")
 	}
 
 	var (
-		size uint64
 		done = false
+		size uint64
 		tb   = wrds.NewTreeBuilder()
 	)
 
 	for !done {
-		n, err := r.Read(buf)
+		data, err := readUntilFull(r, buf)
 		if err == io.EOF {
 			done = true
 		} else if err != nil {
 			return nil, err
 		}
-		data := buf[:n]
+
 		if len(data) < 1 {
-			break
+			continue
 		}
-		ref, err := webref.Post(ctx, s, opts, data)
+		ref, err := s.Post(ctx, data)
 		if err != nil {
 			return nil, err
 		}
@@ -44,12 +42,12 @@ func FileFromReader(ctx context.Context, s stores.ReadPost, opts webref.Options,
 			Key: offset2Key(endOffset),
 			Ref: ref,
 		}
-		if err = tb.Put(ctx, s, opts, ent); err != nil {
+		if err := tb.Put(ctx, s, ent); err != nil {
 			return nil, err
 		}
 		size = endOffset
 	}
-	tree, err := tb.Finish(ctx, s, opts)
+	tree, err := tb.Finish(ctx, s)
 	if err != nil {
 		return nil, err
 	}
@@ -60,20 +58,20 @@ func FileFromReader(ctx context.Context, s stores.ReadPost, opts webref.Options,
 	return f, nil
 }
 
-func FileAppend(ctx context.Context, s stores.ReadPost, opts webref.Options, x File, p []byte) (*File, error) {
+func FileAppend(ctx context.Context, s ReadPost, x File, p []byte) (*File, error) {
 	var (
 		err error
 	)
 	y := &File{}
 
-	ref, err := webref.Post(ctx, s, opts, p)
+	ref, err := s.Post(ctx, p)
 	if err != nil {
 		return nil, err
 	}
 
 	offset := x.Size + uint64(len(p))
 	key := offset2Key(offset)
-	y.Tree, err = x.Tree.Put(ctx, s, opts, key, ref)
+	y.Tree, err = x.Tree.Put(ctx, s, key, ref)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +79,7 @@ func FileAppend(ctx context.Context, s stores.ReadPost, opts webref.Options, x F
 	return y, nil
 }
 
-func FileReadAt(ctx context.Context, s stores.Read, x File, off uint64, p []byte) (n int, err error) {
+func FileReadAt(ctx context.Context, s Getter, x File, off uint64, p []byte) (n int, err error) {
 	for n < len(p) {
 		ent, err := x.Tree.MinGt(ctx, s, offset2Key(off))
 		if err != nil {
@@ -96,7 +94,7 @@ func FileReadAt(ctx context.Context, s stores.Read, x File, off uint64, p []byte
 		if endOffset <= off {
 			return 0, errors.New("got wrong entry from tree")
 		}
-		data, err := webref.Get(ctx, s, *ent.Ref)
+		data, err := s.Get(ctx, ent.Ref)
 		if err != nil {
 			return n, err
 		}
@@ -121,12 +119,12 @@ func FileReadAt(ctx context.Context, s stores.Read, x File, off uint64, p []byte
 	return n, nil
 }
 
-func FileWriteAt(ctx context.Context, s stores.ReadPost, x File) (*File, error) {
+func FileWriteAt(ctx context.Context, s ReadPost, x File) (*File, error) {
 	return nil, errors.New("FileWriteAt not implemented")
 }
 
-func FileSplit(ctx context.Context, store stores.ReadPost, opts webref.Options, x File) (*File, error) {
-	newTree, err := x.Tree.Split(ctx, store, opts)
+func FileSplit(ctx context.Context, store ReadPost, x File) (*File, error) {
+	newTree, err := x.Tree.Split(ctx, store)
 	if err != nil {
 		return nil, err
 	}
@@ -143,4 +141,19 @@ func offset2Key(x uint64) []byte {
 
 func key2Offset(x []byte) uint64 {
 	return binary.BigEndian.Uint64(x)
+}
+
+func readUntilFull(r io.Reader, buf []byte) ([]byte, error) {
+	total := 0
+	for total < len(buf) {
+		n, err := r.Read(buf[total:])
+		total += n
+		if err == io.EOF {
+			return buf[:total], io.EOF
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	return buf[:total], nil
 }

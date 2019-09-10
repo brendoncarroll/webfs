@@ -6,16 +6,6 @@ import (
 	"github.com/brendoncarroll/webfs/pkg/stores"
 )
 
-func PostSingle(ctx context.Context, s stores.Post, prefix string, data []byte, o Options) (*Ref, error) {
-	u, err := s.Post(ctx, prefix, data)
-	if err != nil {
-		return nil, err
-	}
-	return &Ref{
-		Ref: &Ref_Url{u},
-	}, nil
-}
-
 func GetSingle(ctx context.Context, s stores.Read, u string) ([]byte, error) {
 	data, err := s.Get(ctx, u)
 	if err != nil {

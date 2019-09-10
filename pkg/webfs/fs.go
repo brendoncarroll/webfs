@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"os"
 	"path"
 	"sync"
 
@@ -59,7 +60,7 @@ func New(rootCell Cell, baseStore stores.ReadPost) (*WebFS, error) {
 }
 
 func (wfs *WebFS) Find(ctx context.Context, p string) ([]Object, error) {
-	return wfs.find(ctx, parsePath(p))
+	return wfs.find(ctx, ParsePath(p))
 }
 
 func (wfs *WebFS) find(ctx context.Context, p Path) ([]Object, error) {
@@ -67,7 +68,7 @@ func (wfs *WebFS) find(ctx context.Context, p Path) ([]Object, error) {
 }
 
 func (wfs *WebFS) Lookup(ctx context.Context, p string) (Object, error) {
-	p2 := parsePath(p)
+	p2 := ParsePath(p)
 	return wfs.lookup(ctx, p2)
 }
 
@@ -77,7 +78,7 @@ func (wfs *WebFS) lookup(ctx context.Context, p Path) (Object, error) {
 		return nil, err
 	}
 	if o == nil {
-		return nil, errors.New("no entry at " + p.String())
+		return nil, os.ErrNotExist
 	}
 	return o, nil
 }
@@ -130,7 +131,7 @@ func (wfs *WebFS) Ls(ctx context.Context, p string) ([]DirEntry, error) {
 }
 
 func (wfs *WebFS) ImportFile(ctx context.Context, r io.Reader, dst string) error {
-	p := parsePath(dst)
+	p := ParsePath(dst)
 	name := ""
 	if len(p) > 0 {
 		name = p[len(p)-1]
@@ -151,7 +152,7 @@ func (wfs *WebFS) ImportFile(ctx context.Context, r io.Reader, dst string) error
 }
 
 func (wfs *WebFS) Mkdir(ctx context.Context, p string) error {
-	p2 := parsePath(p)
+	p2 := ParsePath(p)
 	name := ""
 	if len(p2) > 0 {
 		name = p2[len(p2)-1]
@@ -195,7 +196,7 @@ func (wfs *WebFS) OpenFile(ctx context.Context, p string) (*FileHandle, error) {
 }
 
 func (wfs *WebFS) Remove(ctx context.Context, p string) error {
-	p2 := parsePath(p)
+	p2 := ParsePath(p)
 	name := ""
 	if len(p2) > 0 {
 		name = p2[len(p2)-1]
@@ -285,7 +286,7 @@ func (wfs *WebFS) NewVolume(ctx context.Context, p string, spec webfsim.VolumeSp
 			Volume: &spec,
 		},
 	}
-	return spec.Id, wfs.putAt(ctx, parsePath(p), v)
+	return spec.Id, wfs.putAt(ctx, ParsePath(p), v)
 }
 
 func (wfs *WebFS) putAt(ctx context.Context, p Path, o webfsim.Object) error {
@@ -381,6 +382,9 @@ func (wfs *WebFS) setupCell(spec *webfsim.VolumeSpec, as *auxState) (Cell, error
 }
 
 func (wfs *WebFS) getStore() *Store {
+	if wfs.baseStore == nil {
+		return nil
+	}
 	routes := []stores.StoreRoute{
 		{
 			Prefix: "",

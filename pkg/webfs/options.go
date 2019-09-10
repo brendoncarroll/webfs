@@ -1,6 +1,8 @@
 package webfs
 
 import (
+	"crypto/rand"
+
 	"github.com/brendoncarroll/webfs/pkg/stores/ipfsstore"
 	"github.com/brendoncarroll/webfs/pkg/webfsim"
 	"github.com/brendoncarroll/webfs/pkg/webref"
@@ -8,11 +10,30 @@ import (
 
 type Options = webfsim.Options
 
+func DefaultWriteOptions() webfsim.WriteOptions {
+	return webfsim.WriteOptions{
+		Codec:           webref.CodecProtobuf,
+		EncAlgo:         webref.EncAlgo_CHACHA20,
+		SecretSeed:      randomBytes(32),
+		ObfuscateLength: false,
+		Replicas:        map[string]int32{},
+	}
+}
+
+func randomBytes(l int) []byte {
+	secret := [32]byte{}
+	_, err := rand.Read(secret[:])
+	if err != nil {
+		panic(err)
+	}
+	return secret[:]
+}
+
 func DefaultOptions() *Options {
-	dataOpts := webref.DefaultOptions()
+	dataOpts := DefaultWriteOptions()
 
 	return &Options{
-		DataOpts: dataOpts,
+		DataOpts: &dataOpts,
 		StoreSpecs: []*webfsim.StoreSpec{
 			{
 				Prefix: "ipfs://",

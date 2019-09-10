@@ -79,7 +79,7 @@ func (v *Volume) Walk(ctx context.Context, f func(Object) bool) (bool, error) {
 	}
 	mo := webfsim.Object{}
 	s := v.getStore()
-	if err := webref.Load(ctx, s, *cc.ObjectRef, &mo); err != nil {
+	if err := webref.GetAndDecode(ctx, s, *cc.ObjectRef, &mo); err != nil {
 		return false, err
 	}
 	o, err := wrapObject(v, "", &mo)
@@ -143,19 +143,22 @@ func (v *Volume) getObject(ctx context.Context) (Object, error) {
 	}
 	mo := webfsim.Object{}
 	s := v.getStore()
-	if err := webref.Load(ctx, s, *m.ObjectRef, &mo); err != nil {
+	if err := webref.GetAndDecode(ctx, s, *m.ObjectRef, &mo); err != nil {
 		return nil, err
 	}
 	return wrapObject(v, "", &mo)
 }
 
 func (v *Volume) put(ctx context.Context, fn ObjectMutator) error {
+	opts := v.getOptions()
+	ctx = webref.SetCodecCtx(ctx, opts.DataOpts.Codec)
+
 	return v.Apply(ctx, func(cur webfsim.Commit) (*webfsim.Commit, error) {
 		var o *webfsim.Object
 		if cur.ObjectRef != nil {
 			o = &webfsim.Object{}
 			s := v.getStore()
-			if err := webref.Load(ctx, s, *cur.ObjectRef, o); err != nil {
+			if err := webref.GetAndDecode(ctx, s, *cur.ObjectRef, o); err != nil {
 				return nil, err
 			}
 		}
@@ -165,7 +168,7 @@ func (v *Volume) put(ctx context.Context, fn ObjectMutator) error {
 			return nil, err
 		}
 
-		ref, err := webref.Store(ctx, v.getStore(), *v.getOptions().DataOpts, o2)
+		ref, err := webref.EncodeAndPost(ctx, v.getStore(), o2)
 		if err != nil {
 			return nil, err
 		}
@@ -263,17 +266,18 @@ func (v *Volume) getStore() *Store {
 		return v.store
 	}
 
-	var parentStore *Store
-	if v.parent != nil {
-		parentStore = v.parent.getStore()
-	} else {
-		parentStore = v.getFS().getStore()
-	}
-
 	opts := v.getOptions()
-	store, err := newStore(parentStore, opts.StoreSpecs)
+	store, err := BuildStore(opts.StoreSpecs, opts.DataOpts)
 	if err != nil {
 		panic("invalid store: " + err.Error())
+	}
+	if v.parent == nil {
+		baseStore := v.fs.getStore()
+		if baseStore != nil {
+			store.router.AppendWith(baseStore.router)
+		}
+	} else {
+		store.router.AppendWith(v.parent.getStore().router)
 	}
 
 	v.store = store

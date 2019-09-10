@@ -5,11 +5,17 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/brendoncarroll/webfs/pkg/stores"
 	webref "github.com/brendoncarroll/webfs/pkg/webref"
 )
 
-func DirGet(ctx context.Context, store stores.Read, m Dir, name string) (*DirEntry, error) {
+type ReadPost interface {
+	webref.Getter
+	webref.Poster
+}
+
+type Getter = webref.Getter
+
+func DirGet(ctx context.Context, store Getter, m Dir, name string) (*DirEntry, error) {
 	key := []byte(name)
 	treeEnt, err := m.Tree.Get(ctx, store, key)
 	if err != nil {
@@ -20,13 +26,13 @@ func DirGet(ctx context.Context, store stores.Read, m Dir, name string) (*DirEnt
 	}
 
 	dirEnt := DirEntry{}
-	if err := webref.Load(ctx, store, *treeEnt.Ref, &dirEnt); err != nil {
+	if err := webref.GetAndDecode(ctx, store, *treeEnt.Ref, &dirEnt); err != nil {
 		return nil, err
 	}
 	return &dirEnt, nil
 }
 
-func DirPut(ctx context.Context, store stores.ReadPost, opts webref.Options, m Dir, ent DirEntry) (*Dir, error) {
+func DirPut(ctx context.Context, store ReadPost, m Dir, ent DirEntry) (*Dir, error) {
 	if strings.Contains(ent.Name, "/") {
 		return nil, errors.New("directory name contains a slash")
 	}
@@ -36,9 +42,9 @@ func DirPut(ctx context.Context, store stores.ReadPost, opts webref.Options, m D
 		err error
 	)
 	for {
-		ref, err = webref.Store(ctx, store, opts, &ent)
+		ref, err = webref.EncodeAndPost(ctx, store, &ent)
 		if err == webref.ErrMaxSizeExceeded {
-			ent, err = DirEntSplit(ctx, store, opts, ent)
+			ent, err = DirEntSplit(ctx, store, ent)
 			if err != nil {
 				return nil, err
 			}
@@ -51,32 +57,32 @@ func DirPut(ctx context.Context, store stores.ReadPost, opts webref.Options, m D
 	}
 
 	key := []byte(ent.Name)
-	tree, err := m.Tree.Put(ctx, store, opts, key, ref)
+	tree, err := m.Tree.Put(ctx, store, key, ref)
 	if err != nil {
 		return nil, err
 	}
 	return &Dir{Tree: tree}, nil
 }
 
-func DirDelete(ctx context.Context, store stores.ReadPost, opts webref.Options, m Dir, name string) (*Dir, error) {
+func DirDelete(ctx context.Context, store ReadPost, m Dir, name string) (*Dir, error) {
 	key := []byte(name)
-	newTree, err := m.Tree.Delete(ctx, store, opts, key)
+	newTree, err := m.Tree.Delete(ctx, store, key)
 	if err != nil {
 		return nil, err
 	}
 	return &Dir{Tree: newTree}, nil
 }
 
-func DirSplit(ctx context.Context, store stores.ReadPost, opts webref.Options, x Dir) (*Dir, error) {
-	newTree, err := x.Tree.Split(ctx, store, opts)
+func DirSplit(ctx context.Context, store ReadPost, x Dir) (*Dir, error) {
+	newTree, err := x.Tree.Split(ctx, store)
 	if err != nil {
 		return nil, err
 	}
 	return &Dir{Tree: newTree}, nil
 }
 
-func DirEntSplit(ctx context.Context, store stores.ReadPost, opts webref.Options, x DirEntry) (DirEntry, error) {
-	o2, err := ObjectSplit(ctx, store, opts, *x.Object)
+func DirEntSplit(ctx context.Context, store ReadPost, x DirEntry) (DirEntry, error) {
+	o2, err := ObjectSplit(ctx, store, *x.Object)
 	if err != nil {
 		return DirEntry{}, nil
 	}

@@ -14,6 +14,9 @@ var rmCmd = &cobra.Command{
 	Short: "remove",
 	Use:   "rm",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := setupWfs(); err != nil {
+			return err
+		}
 		if len(args) < 1 {
 			return errors.New("must provide path to remove")
 		}

@@ -30,8 +30,8 @@ func New(p string) *Cell {
 	return c
 }
 
-func (c *Cell) ID() string {
-	return "filecell-%s" + c.p
+func (c *Cell) URL() string {
+	return "file://" + c.p
 }
 
 func (c *Cell) Get(ctx context.Context) ([]byte, error) {

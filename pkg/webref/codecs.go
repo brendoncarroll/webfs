@@ -110,6 +110,7 @@ func Decode(codec string, data []byte, x interface{}) error {
 				return err
 			}
 		} else {
+			log.Printf("WARN: using regular json decoder for type %T\n", x)
 			if err := json.Unmarshal(data, x); err != nil {
 				return err
 			}

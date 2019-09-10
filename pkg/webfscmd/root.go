@@ -13,7 +13,7 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Short: "webfs",
+	Short: "WebFS",
 	Use:   "webfs",
 }
 

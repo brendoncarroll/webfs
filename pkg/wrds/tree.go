@@ -224,9 +224,53 @@ func (t *Tree) Delete(ctx context.Context, s ReadWriteOnce, opts Options, key []
 func (t *Tree) delete(ctx context.Context, s ReadWriteOnce, opts Options, key []byte) (*Tree, error) {
 	// TODO: not balanced
 	i := t.indexGet(key)
-	if i >= len(t.Entries) {
-		return nil, errors.New("no entry found")
+	if i < 0 {
+		return t, nil
 	}
+
+	newEntries := []*TreeEntry{}
+	switch {
+	case t.Level > 1:
+		subTree, err := t.getSubtree(ctx, s, i)
+		if err != nil {
+			return nil, err
+		}
+
+		newSt, err := subTree.delete(ctx, s, opts, key)
+		if err != nil {
+			return nil, err
+		}
+		ref, err := webref.Store(ctx, s, opts, newSt)
+		if err != nil {
+			return nil, err
+		}
+
+		ent := &TreeEntry{Key: subTree.MinKey(), Ref: ref}
+		newEntries = append(newEntries, t.Entries[:i]...)
+		newEntries = append(newEntries, ent)
+		if i < len(t.Entries)-1 {
+			newEntries = append(newEntries, t.Entries[i+1:]...)
+		}
+
+	case t.Level == 1:
+		ent := t.Entries[i]
+		if bytes.Compare(key, ent.Key) == 0 {
+			newEntries = append(newEntries, t.Entries[:i]...)
+			if i < len(t.Entries)-1 {
+				newEntries = append(newEntries, t.Entries[i+1:]...)
+			}
+		} else {
+			return t, nil
+		}
+	default:
+		return nil, errors.New("Invalid tree level")
+	}
+
+	newTree := &Tree{
+		Level:   t.Level,
+		Entries: newEntries,
+	}
+	return newTree, nil
 
 	switch {
 	case t.Level == 1:

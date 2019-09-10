@@ -12,13 +12,13 @@ func TestHttpCell(t *testing.T) {
 	ctx, cf := context.WithCancel(ctx)
 	defer cf()
 
-	const addr = "127.0.0.1:34567"
+	const addr = "127.0.0.1:"
 
 	server := NewServer()
 	go server.Serve(ctx, addr)
 	server.newCell("cell1")
 
-	u := "http://" + addr + "/cell1"
+	u := server.URL() + "cell1"
 	cell := New(Spec{URL: u})
 
 	data, err := cell.Get(ctx)

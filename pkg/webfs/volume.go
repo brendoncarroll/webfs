@@ -1,8 +1,12 @@
 package webfs
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+
+	"github.com/golang/protobuf/jsonpb"
 
 	"github.com/brendoncarroll/webfs/pkg/cells"
 	"github.com/brendoncarroll/webfs/pkg/webfs/models"
@@ -19,11 +23,15 @@ type VolumeMutator func(models.Commit) (*models.Commit, error)
 type ObjectMutator func(*models.Object) (*models.Object, error)
 
 type Volume struct {
-	uid  string
+	spec *models.VolumeSpec
 	cell Cell
 	opts *Options
 
 	baseObject
+}
+
+func (v *Volume) ID() string {
+	return v.spec.Id
 }
 
 func (v *Volume) Find(ctx context.Context, p Path, objs []Object) ([]Object, error) {
@@ -79,12 +87,19 @@ func (v *Volume) Walk(ctx context.Context, f func(Object) bool) (bool, error) {
 }
 
 func (v *Volume) ChangeOptions(ctx context.Context, fn func(x *Options) *Options) error {
-	v.Apply(ctx, func(cx models.Commit) (*models.Commit, error) {
+	return v.Apply(ctx, func(cx models.Commit) (*models.Commit, error) {
 		yx := cx
 		yx.Options = fn(cx.Options)
 		return &yx, nil
 	})
-	return nil
+}
+
+func (v *Volume) SetOptions(ctx context.Context, opts *Options) error {
+	return v.Apply(ctx, func(cx models.Commit) (*models.Commit, error) {
+		yx := cx
+		yx.Options = opts
+		return &yx, nil
+	})
 }
 
 func (v *Volume) Get(ctx context.Context) (*models.Commit, error) {
@@ -197,7 +212,11 @@ func (v *Volume) Path() Path {
 	if v.parent == nil {
 		return Path{}
 	}
-	return v.parent.Path()
+	p := v.parent.Path()
+	if v.nameInParent != "" {
+		p = append(p, v.nameInParent)
+	}
+	return p
 }
 
 func (v *Volume) RefIter(ctx context.Context, f func(webref.Ref) bool) (bool, error) {
@@ -210,11 +229,25 @@ func (v *Volume) RefIter(ctx context.Context, f func(webref.Ref) bool) (bool, er
 }
 
 func (v *Volume) String() string {
-	return "Volume::" + v.cell.ID()
+	return fmt.Sprintf("Volume{%s}", v.cell.URL())
 }
 
 func (v *Volume) Size() uint64 {
 	return 0
+}
+
+func (v *Volume) Describe() string {
+	m := jsonpb.Marshaler{
+		Indent:       " ",
+		EmitDefaults: true,
+	}
+	buf := bytes.Buffer{}
+	m.Marshal(&buf, v.spec)
+	return string(buf.Bytes())
+}
+
+func (v *Volume) URL() string {
+	return v.cell.URL()
 }
 
 func (v *Volume) getStore() *Store {

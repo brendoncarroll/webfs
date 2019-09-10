@@ -15,13 +15,15 @@ import (
 type Path []string
 
 func (p Path) String() string {
-	return strings.Join(p, "/")
+	return "/" + strings.Join(p, "/")
 }
 
 func parsePath(x string) Path {
 	y := []string{}
 	for _, part := range strings.Split(x, "/") {
-		if part != "" {
+		switch part {
+		case "", ".":
+		default:
 			y = append(y, part)
 		}
 	}
@@ -35,7 +37,6 @@ type Object interface {
 	Path() Path
 	Size() uint64
 	String() string
-
 	RefIter(ctx context.Context, f func(webref.Ref) bool) (bool, error)
 
 	getFS() *WebFS
@@ -116,11 +117,12 @@ func wrapObject(parent Object, nameInParent string, o *models.Object) (Object, e
 	switch o2 := o.Value.(type) {
 	case *models.Object_Volume:
 		wfs := parent.getFS()
-		cell, err := wfs.getCellBySpec(o2.Volume)
+		cell, err := wfs.setupCell(o2.Volume)
 		if err != nil {
 			return nil, err
 		}
 		return &Volume{
+			spec:       o2.Volume,
 			cell:       cell,
 			baseObject: base,
 		}, nil

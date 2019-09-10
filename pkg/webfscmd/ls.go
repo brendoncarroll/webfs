@@ -4,12 +4,15 @@ import (
 	"fmt"
 
 	"github.com/brendoncarroll/webfs/pkg/webfs"
+	"github.com/dustin/go-humanize"
 	"github.com/spf13/cobra"
 )
 
 func init() {
 	rootCmd.AddCommand(lsCmd)
 }
+
+var lsHeaders = []string{"PATH", "SIZE", "OBJECT"}
 
 var lsCmd = &cobra.Command{
 	Use:   "ls",
@@ -23,13 +26,13 @@ var lsCmd = &cobra.Command{
 		if len(args) > 0 {
 			p = args[0]
 		}
-		fmt.Println(p)
 		entries, err := wfs.Ls(ctx, p)
 		if err != nil {
 			return err
 		}
+
+		rows := [][]string{lsHeaders}
 		for _, e := range entries {
-			fmt.Print(" ")
 			oStr := ""
 			if v, ok := e.Object.(*webfs.Volume); ok {
 				o, err := v.Lookup(ctx, nil)
@@ -40,9 +43,10 @@ var lsCmd = &cobra.Command{
 			} else {
 				oStr = fmt.Sprint(e.Object)
 			}
-
-			fmt.Printf("%-20s %10dB %-30s\n", e.Name, e.Object.Size(), oStr)
+			sizeStr := fmt.Sprintf("%20s", humanize.Bytes(e.Object.Size()))
+			row := []string{e.Name, sizeStr, oStr}
+			rows = append(rows, row)
 		}
-		return nil
+		return printTable(cmd.OutOrStdout(), rows)
 	},
 }

@@ -29,27 +29,27 @@ type Spec struct {
 }
 
 type Cell struct {
-	Spec
-	hc *http.Client
+	spec Spec
+	hc   *http.Client
 }
 
 func New(spec Spec) *Cell {
 	return &Cell{
-		Spec: spec,
+		spec: spec,
 		hc:   http.DefaultClient,
 	}
 }
 
-func (c *Cell) ID() string {
-	return "httpcell-" + c.URL
+func (c *Cell) URL() string {
+	return c.spec.URL
 }
 
 func (c *Cell) Get(ctx context.Context) ([]byte, error) {
-	req, err := http.NewRequest(http.MethodGet, c.Spec.URL, nil)
+	req, err := http.NewRequest(http.MethodGet, c.spec.URL, nil)
 	if err != nil {
 		panic(err)
 	}
-	req.Header.Add(authHeader, c.AuthHeader)
+	req.Header.Add(authHeader, c.spec.AuthHeader)
 	resp, err := c.hc.Do(req)
 	if err != nil {
 		return nil, err
@@ -69,11 +69,11 @@ func (c *Cell) Get(ctx context.Context) ([]byte, error) {
 func (c *Cell) CAS(ctx context.Context, cur, next []byte) (bool, error) {
 	curHash := sha3.Sum256(cur)
 	curHashb64 := base64.URLEncoding.EncodeToString(curHash[:])
-	req, err := http.NewRequest(http.MethodPut, c.URL, bytes.NewBuffer(next))
+	req, err := http.NewRequest(http.MethodPut, c.spec.URL, bytes.NewBuffer(next))
 	if err != nil {
 		return false, err
 	}
-	req.Header.Add(authHeader, c.AuthHeader)
+	req.Header.Add(authHeader, c.spec.AuthHeader)
 	req.Header.Add(currentHeader, curHashb64)
 	resp, err := c.hc.Do(req)
 	if err != nil {

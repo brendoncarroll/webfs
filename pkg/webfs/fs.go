@@ -2,6 +2,8 @@ package webfs
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base32"
 	"errors"
 	"io"
 	"log"
@@ -19,12 +21,14 @@ type Ref = webref.Ref
 
 type WebFS struct {
 	root      *Volume
+	volumes   sync.Map
 	cells     sync.Map
 	baseStore stores.ReadWriteOnce
 }
 
 func New(rootCell Cell, baseStore stores.ReadWriteOnce) (*WebFS, error) {
 	wfs := &WebFS{
+		volumes:   sync.Map{},
 		cells:     sync.Map{},
 		baseStore: baseStore,
 	}
@@ -32,6 +36,9 @@ func New(rootCell Cell, baseStore stores.ReadWriteOnce) (*WebFS, error) {
 	wfs.addCell(rootCell)
 
 	rv := &Volume{
+		spec: &models.VolumeSpec{
+			Id: "root",
+		},
 		cell: rootCell,
 		baseObject: baseObject{
 			fs:           wfs,
@@ -90,7 +97,6 @@ func (wfs *WebFS) lookupParent(ctx context.Context, p Path) (Object, error) {
 	}
 	last := len(objs) - 1
 	o := objs[last]
-
 	dir, ok := o.(*Dir)
 	if !ok {
 		return o, nil
@@ -100,10 +106,10 @@ func (wfs *WebFS) lookupParent(ctx context.Context, p Path) (Object, error) {
 	if err != nil {
 		return nil, err
 	}
-	if o2 == nil {
-		return o, nil
+	if v, ok := o2.(*Volume); ok {
+		return v, nil
 	}
-	return o2, nil
+	return o, nil
 }
 
 func (wfs *WebFS) Ls(ctx context.Context, p string) ([]DirEntry, error) {
@@ -186,21 +192,21 @@ func (wfs *WebFS) OpenFile(ctx context.Context, p string) (*FileHandle, error) {
 }
 
 func (wfs *WebFS) Remove(ctx context.Context, p string) error {
-	dirp := path.Dir(p)
-	basep := path.Base(p)
-	if basep == p {
-		return errors.New("cannot delete " + p)
+	p2 := parsePath(p)
+	name := ""
+	if len(p2) > 0 {
+		name = p2[len(p2)-1]
 	}
 
-	o, err := wfs.Lookup(ctx, dirp)
+	parent, err := wfs.lookupParent(ctx, p2)
 	if err != nil {
 		return err
 	}
-	d, ok := o.(*Dir)
+	d, ok := parent.(*Dir)
 	if !ok {
 		return errors.New("cannot remove from non-dir parent")
 	}
-	return d.Delete(ctx, basep)
+	return d.Delete(ctx, name)
 }
 
 func (wfs *WebFS) WalkObjects(ctx context.Context, f func(o Object) bool) error {
@@ -228,6 +234,9 @@ func (wfs *WebFS) RefIter(ctx context.Context, f func(ref webref.Ref) bool) erro
 }
 
 func (wfs *WebFS) NewVolume(ctx context.Context, p string, spec models.VolumeSpec) error {
+	if spec.Id == "" {
+		spec.Id = generateVolId()
+	}
 	var cell cells.Cell
 	switch x := spec.CellSpec.(type) {
 	case *models.VolumeSpec_Http:
@@ -287,6 +296,19 @@ func (wfs *WebFS) putAt(ctx context.Context, p Path, o models.Object) error {
 	return err
 }
 
+func (wfs *WebFS) GetVolume(ctx context.Context, id string) (*Volume, error) {
+	var vol *Volume
+	err := wfs.WalkObjects(ctx, func(o Object) bool {
+		v, ok := o.(*Volume)
+		if ok && v.ID() == id {
+			vol = v
+			return false
+		}
+		return true
+	})
+	return vol, err
+}
+
 func (wfs *WebFS) ListVolumes(ctx context.Context) ([]*Volume, error) {
 	vols := []*Volume{}
 	err := wfs.WalkObjects(ctx, func(o Object) bool {
@@ -300,13 +322,13 @@ func (wfs *WebFS) ListVolumes(ctx context.Context) ([]*Volume, error) {
 }
 
 func (wfs *WebFS) addCell(cell Cell) {
-	_, loaded := wfs.cells.LoadOrStore(cell.ID(), cell)
+	_, loaded := wfs.cells.LoadOrStore(cell.URL(), cell)
 	if loaded {
 		log.Println("loaded cell", cell)
 	}
 }
 
-func (wfs *WebFS) getCellByID(id string) Cell {
+func (wfs *WebFS) getCellByURL(id string) Cell {
 	cell, _ := wfs.cells.Load(id)
 	if cell == nil {
 		return nil
@@ -314,7 +336,7 @@ func (wfs *WebFS) getCellByID(id string) Cell {
 	return cell.(Cell)
 }
 
-func (wfs *WebFS) getCellBySpec(spec *models.VolumeSpec) (Cell, error) {
+func (wfs *WebFS) setupCell(spec *models.VolumeSpec) (Cell, error) {
 	var newCell cells.Cell
 
 	switch x := spec.CellSpec.(type) {
@@ -328,13 +350,14 @@ func (wfs *WebFS) getCellBySpec(spec *models.VolumeSpec) (Cell, error) {
 		return nil, errors.New("cell type not recognized")
 	}
 
-	cell, loaded := wfs.cells.LoadOrStore(newCell.ID(), newCell)
+	cell, loaded := wfs.cells.LoadOrStore(newCell.URL(), newCell)
 	if loaded {
-		log.Println("loaded new cell", newCell.ID())
+		//log.Println("loaded new cell", newCell.URL())
 	}
 	if cell == nil {
 		return nil, errors.New("could not create cell")
 	}
+
 	return cell.(Cell), nil
 }
 
@@ -358,4 +381,11 @@ func dirpath(p string) string {
 
 func basepath(p string) string {
 	return path.Base(p)
+}
+
+func generateVolId() string {
+	encoder := base32.StdEncoding.WithPadding(base32.NoPadding)
+	buf := make([]byte, 16)
+	rand.Reader.Read(buf)
+	return encoder.EncodeToString(buf)
 }

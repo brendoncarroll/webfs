@@ -106,12 +106,9 @@ func (d *Dir) Walk(ctx context.Context, f func(Object) bool) (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		cont = f(o2)
-		if cont {
-			cont, err = o2.Walk(ctx, f)
-			if err != nil {
-				return false, err
-			}
+		cont, err = o2.Walk(ctx, f)
+		if err != nil {
+			return false, err
 		}
 	}
 	return cont, nil

@@ -41,10 +41,10 @@ var newVol = &cobra.Command{
 			return err
 		}
 		spec := models.VolumeSpec{}
+
 		if err := webref.Decode(webref.CodecJSON, data, &spec); err != nil {
 			return err
 		}
-
 		return wfs.NewVolume(ctx, path, spec)
 	},
 	Aliases: []string{"vol"},

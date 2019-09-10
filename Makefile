@@ -1,0 +1,3 @@
+
+test:
+	go test ./pkg/...

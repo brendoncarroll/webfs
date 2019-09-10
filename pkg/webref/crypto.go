@@ -16,16 +16,23 @@ import (
 	"github.com/brendoncarroll/webfs/pkg/stores"
 )
 
-func PostCrypto(ctx context.Context, s stores.Post, o Options, prefix string, data []byte) (*Ref, error) {
-	secret := generateSecret(data, o.SecretSeed)
+type CryptoStore struct {
+	Inner           Poster
+	EncAlgo         EncAlgo
+	SecretSeed      []byte
+	ObfuscateLength bool
+}
+
+func (s CryptoStore) Post(ctx context.Context, data []byte) (*Ref, error) {
+	secret := generateSecret(data, s.SecretSeed)
 
 	ctextLen := len(data)
-	if o.ObfuscateLength {
+	if s.ObfuscateLength {
 		ctextLen = obfuscatedLength(len(data))
 	}
 
 	ctext := make([]byte, ctextLen)
-	if err := crypt(o.EncAlgo, secret, data, ctext); err != nil {
+	if err := crypt(s.EncAlgo, secret, data, ctext); err != nil {
 		return nil, err
 	}
 
@@ -33,7 +40,7 @@ func PostCrypto(ctx context.Context, s stores.Post, o Options, prefix string, da
 		return nil, err
 	}
 
-	ref, err := PostSingle(ctx, s, prefix, ctext, o)
+	ref, err := s.Inner.Post(ctx, ctext)
 	if err != nil {
 		return nil, err
 	}
@@ -42,12 +49,16 @@ func PostCrypto(ctx context.Context, s stores.Post, o Options, prefix string, da
 		Ref: &Ref_Crypto{
 			&Crypto{
 				Ref:     ref,
-				EncAlgo: o.EncAlgo,
+				EncAlgo: s.EncAlgo,
 				Dek:     secret,
 				Length:  int32(len(data)),
 			},
 		},
 	}, nil
+}
+
+func (s CryptoStore) MaxBlobSize() int {
+	return s.Inner.MaxBlobSize()
 }
 
 func GetCrypto(ctx context.Context, store stores.Read, r *Crypto) ([]byte, error) {

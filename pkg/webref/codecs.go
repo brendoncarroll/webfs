@@ -7,7 +7,6 @@ import (
 	"errors"
 	"log"
 
-	"github.com/brendoncarroll/webfs/pkg/stores"
 	"github.com/golang/protobuf/jsonpb"
 	"github.com/golang/protobuf/proto"
 )
@@ -17,7 +16,7 @@ const (
 	CodecProtobuf = "PB"
 )
 
-func Load(ctx context.Context, s stores.Read, ref Ref, x interface{}) error {
+func GetAndDecode(ctx context.Context, s Getter, ref Ref, x interface{}) error {
 	aref, ok := ref.Ref.(*Ref_Annotated)
 	if !ok {
 		return errors.New("can't load from non-annotated ref")
@@ -28,7 +27,7 @@ func Load(ctx context.Context, s stores.Read, ref Ref, x interface{}) error {
 		codec = annotations["codec"]
 	}
 
-	data, err := Get(ctx, s, ref)
+	data, err := s.Get(ctx, &ref)
 	if err != nil {
 		return err
 	}
@@ -36,8 +35,8 @@ func Load(ctx context.Context, s stores.Read, ref Ref, x interface{}) error {
 	return Decode(codec, data, x)
 }
 
-func Store(ctx context.Context, s stores.Post, opts Options, x interface{}) (*Ref, error) {
-	codec := opts.Attrs["codec"]
+func EncodeAndPost(ctx context.Context, s Poster, x interface{}) (*Ref, error) {
+	codec := GetCodecCtx(ctx)
 	if codec == "" {
 		codec = CodecJSON
 	}
@@ -46,7 +45,7 @@ func Store(ctx context.Context, s stores.Post, opts Options, x interface{}) (*Re
 		return nil, err
 	}
 
-	ref, err := Post(ctx, s, opts, data)
+	ref, err := s.Post(ctx, data)
 	if err != nil {
 		return nil, err
 	}
@@ -61,8 +60,7 @@ func Store(ctx context.Context, s stores.Post, opts Options, x interface{}) (*Re
 	}, nil
 }
 
-func SizeOf(s stores.Post, o Options, x interface{}) int {
-	codec := o.Attrs["codec"]
+func SizeOf(codec string, x interface{}) int {
 	switch codec {
 	case CodecProtobuf:
 		pm, ok := x.(proto.Message)
@@ -70,6 +68,7 @@ func SizeOf(s stores.Post, o Options, x interface{}) int {
 			panic("can't use protobuf encoding with non proto.Message")
 		}
 		return proto.Size(pm)
+
 	default:
 		data, err := Encode(codec, x)
 		if err != nil {
@@ -107,6 +106,7 @@ func Encode(codec string, x interface{}) (data []byte, err error) {
 			return nil, errors.New("cannot marshal non-protobuf as protobuf")
 		}
 	default:
+		log.Println("CODEC", codec)
 		return nil, errors.New("unrecognized codec: " + codec)
 	}
 	return data, err

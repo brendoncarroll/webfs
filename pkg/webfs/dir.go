@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"log"
+	"os"
+	"time"
 
-	"github.com/brendoncarroll/webfs/pkg/stores"
 	"github.com/brendoncarroll/webfs/pkg/webfsim"
 	"github.com/brendoncarroll/webfs/pkg/webref"
 	"github.com/brendoncarroll/webfs/pkg/wrds"
@@ -96,7 +97,7 @@ func (d *Dir) Walk(ctx context.Context, f func(Object) bool) (bool, error) {
 		}
 
 		dirEnt := webfsim.DirEntry{}
-		if err := webref.Load(ctx, d.getStore(), *ent.Ref, &dirEnt); err != nil {
+		if err := webref.GetAndDecode(ctx, d.getStore(), *ent.Ref, &dirEnt); err != nil {
 			return false, err
 		}
 
@@ -118,14 +119,20 @@ func (d *Dir) Get(ctx context.Context, name string) (*webfsim.DirEntry, error) {
 }
 
 func (d *Dir) Put(ctx context.Context, ent webfsim.DirEntry) error {
+	opts := d.getOptions()
+	ctx = webref.SetCodecCtx(ctx, opts.DataOpts.Codec)
+
 	return d.Apply(ctx, func(ctx context.Context, cur *webfsim.Dir) (*webfsim.Dir, error) {
-		return webfsim.DirPut(ctx, d.getStore(), *d.getOptions().DataOpts, *cur, ent)
+		return webfsim.DirPut(ctx, d.getStore(), *cur, ent)
 	})
 }
 
 func (d *Dir) Delete(ctx context.Context, name string) error {
+	opts := d.getOptions()
+	ctx = webref.SetCodecCtx(ctx, opts.DataOpts.Codec)
+
 	return d.Apply(ctx, func(ctx context.Context, cur *webfsim.Dir) (*webfsim.Dir, error) {
-		return webfsim.DirDelete(ctx, d.getStore(), *d.getOptions().DataOpts, *cur, name)
+		return webfsim.DirDelete(ctx, d.getStore(), *cur, name)
 	})
 }
 
@@ -146,7 +153,7 @@ func (d *Dir) Entries(ctx context.Context) ([]DirEntry, error) {
 		}
 
 		dirEnt := &webfsim.DirEntry{}
-		if err := webref.Load(ctx, d.getStore(), *ent.Ref, dirEnt); err != nil {
+		if err := webref.GetAndDecode(ctx, d.getStore(), *ent.Ref, dirEnt); err != nil {
 			return nil, err
 		}
 		o, err := wrapObject(d, dirEnt.Name, dirEnt.Object)
@@ -171,8 +178,18 @@ func (d *Dir) String() string {
 	return "Object{Dir}"
 }
 
-func (d *Dir) split(ctx context.Context, s stores.ReadPost, opts webref.Options, x webfsim.Dir) (*webfsim.Dir, error) {
-	newTree, err := x.Tree.Split(ctx, s, opts)
+func (d Dir) FileInfo() FileInfo {
+	t := time.Now().AddDate(0, 0, -1)
+	return FileInfo{
+		CreatedAt:  t,
+		ModifiedAt: t,
+		AccessedAt: t,
+		Mode:       0755 | os.ModeDir,
+	}
+}
+
+func (d *Dir) split(ctx context.Context, s webref.Poster, x webfsim.Dir) (*webfsim.Dir, error) {
+	newTree, err := x.Tree.Split(ctx, s)
 	if err != nil {
 		return nil, err
 	}
@@ -181,7 +198,9 @@ func (d *Dir) split(ctx context.Context, s stores.ReadPost, opts webref.Options,
 
 func (d *Dir) put(ctx context.Context, name string, fn ObjectMutator) error {
 	store := d.getStore()
-	opts := d.getOptions().DataOpts
+	opts := d.getOptions()
+	ctx = webref.SetCodecCtx(ctx, opts.DataOpts.Codec)
+
 	return d.Apply(ctx, func(ctx context.Context, cur *webfsim.Dir) (*webfsim.Dir, error) {
 		// get the entry at name
 		ent, err := webfsim.DirGet(ctx, store, *cur, name)
@@ -199,7 +218,7 @@ func (d *Dir) put(ctx context.Context, name string, fn ObjectMutator) error {
 		}
 		// replace the entry at name
 		newEnt := webfsim.DirEntry{Name: name, Object: o2}
-		return webfsim.DirPut(ctx, store, *opts, *cur, newEnt)
+		return webfsim.DirPut(ctx, store, *cur, newEnt)
 	})
 }
 

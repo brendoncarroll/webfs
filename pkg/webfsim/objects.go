@@ -4,9 +4,6 @@ import (
 	"context"
 	fmt "fmt"
 	"time"
-
-	"github.com/brendoncarroll/webfs/pkg/stores"
-	webref "github.com/brendoncarroll/webfs/pkg/webref"
 )
 
 type Snapshot struct {
@@ -15,13 +12,13 @@ type Snapshot struct {
 	Timestamp time.Time  `json:"timestamp"`
 }
 
-func ObjectSplit(ctx context.Context, s stores.ReadPost, opts webref.Options, o Object) (*Object, error) {
+func ObjectSplit(ctx context.Context, s ReadPost, o Object) (*Object, error) {
 	var (
 		o2 *Object
 	)
 	switch x := o.Value.(type) {
 	case *Object_Dir:
-		d2, err := DirSplit(ctx, s, opts, *x.Dir)
+		d2, err := DirSplit(ctx, s, *x.Dir)
 		if err != nil {
 			return nil, err
 		}
@@ -29,7 +26,7 @@ func ObjectSplit(ctx context.Context, s stores.ReadPost, opts webref.Options, o 
 			Value: &Object_Dir{Dir: d2},
 		}
 	case *Object_File:
-		f2, err := FileSplit(ctx, s, opts, *x.File)
+		f2, err := FileSplit(ctx, s, *x.File)
 		if err != nil {
 			return nil, err
 		}

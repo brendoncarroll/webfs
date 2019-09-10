@@ -44,10 +44,19 @@ message Commit {
 
 // Volume Options
 message Options {
-    webref.Options data_opts = 1;
-    webref.Options metadata_opts = 2;
+    WriteOptions data_opts = 1;
+    WriteOptions metadata_opts = 2;
 
     repeated StoreSpec store_specs = 3;
+}
+
+message WriteOptions {
+    webref.EncAlgo enc_algo = 1;
+    bytes secret_seed = 2;
+    bool obfuscate_length = 3;
+
+    map<string, int32> replicas = 4;
+    string codec = 5;
 }
 
 message StoreSpec {

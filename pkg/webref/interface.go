@@ -8,6 +8,23 @@ import (
 	"github.com/brendoncarroll/webfs/pkg/stores"
 )
 
+type Getter interface {
+	Get(ctx context.Context, ref *Ref) ([]byte, error)
+}
+
+type Poster interface {
+	Post(ctx context.Context, data []byte) (*Ref, error)
+	MaxBlobSize() int
+}
+
+type Checker interface {
+	Check(ctx context.Context, ref *Ref) []RefStatus
+}
+
+type Deleter interface {
+	Delete(ctx context.Context, ref *Ref) error
+}
+
 func errRefType(ref isRef_Ref) error {
 	return fmt.Errorf("invalid ref type: %T", ref)
 }
@@ -25,26 +42,6 @@ func Get(ctx context.Context, s stores.Read, ref Ref) ([]byte, error) {
 	default:
 		return nil, errRefType(r)
 	}
-}
-
-func Post(ctx context.Context, s stores.Post, opts Options, data []byte) (*Ref, error) {
-	if len(opts.Replicas) == 0 {
-		return nil, errors.New("no replicas to post to")
-	}
-	if len(opts.Replicas) > 1 {
-		return PostMirror(ctx, s, opts, data)
-	}
-
-	var prefix string
-	for k, v := range opts.Replicas {
-		if v > 1 {
-			return PostMirror(ctx, s, opts, data)
-		}
-		prefix = k
-		break
-	}
-
-	return PostCrypto(ctx, s, opts, prefix, data)
 }
 
 func Delete(ctx context.Context, s stores.Delete, ref Ref) error {
@@ -68,7 +65,7 @@ func GetURLs(ref *Ref) []string {
 		return GetURLs(r.Crypto.Ref)
 	case *Ref_Mirror:
 		ret := []string{}
-		for _, ref2 := range r.Mirror.Replicas {
+		for _, ref2 := range r.Mirror.Refs {
 			us := GetURLs(ref2)
 			ret = append(ret, us...)
 		}

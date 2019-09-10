@@ -30,15 +30,14 @@ func TestIndexOf(t *testing.T) {
 
 func TestPutGet(t *testing.T) {
 	const N = 1000
-	s := stores.NewMemStore(4096)
-	opts := *webref.DefaultOptions()
+	s := &webref.BasicStore{stores.NewMemStore(4096)}
 
 	tree := NewTree()
 	var err error
 	for i := 0; i < N; i++ {
 		key := []byte(fmt.Sprintf("key%03d", i))
 		ref := &webref.Ref{}
-		tree, err = tree.Put(ctx, s, opts, key, ref)
+		tree, err = tree.Put(ctx, s, key, ref)
 		require.Nil(t, err)
 	}
 	t.Log("tree root has", len(tree.Entries), "entries")
@@ -58,15 +57,14 @@ func TestPutGet(t *testing.T) {
 
 func TestMinGt(t *testing.T) {
 	const N = 1000
-	s := stores.NewMemStore(4096)
-	opts := *webref.DefaultOptions()
+	s := &webref.BasicStore{stores.NewMemStore(4096)}
 
 	tree := NewTree()
 	var err error
 	for i := 0; i < N; i++ {
 		key := []byte(fmt.Sprintf("key%03d", i))
 		ref := &webref.Ref{}
-		tree, err = tree.Put(ctx, s, opts, key, ref)
+		tree, err = tree.Put(ctx, s, key, ref)
 		require.Nil(t, err)
 	}
 

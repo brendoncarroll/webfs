@@ -24,7 +24,7 @@ message Slice {
 }
 
 message Mirror {
-    repeated Ref replicas = 1;
+    repeated Ref refs = 1;
 }
 
 message ReedSolomon {

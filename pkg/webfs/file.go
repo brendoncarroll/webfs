@@ -5,8 +5,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"time"
 
-	"github.com/brendoncarroll/webfs/pkg/stores"
 	"github.com/brendoncarroll/webfs/pkg/webfsim"
 	"github.com/brendoncarroll/webfs/pkg/webref"
 	"github.com/brendoncarroll/webfs/pkg/wrds"
@@ -40,9 +40,11 @@ func (f *File) SetData(ctx context.Context, r io.Reader) error {
 		r = &bytes.Buffer{}
 	}
 	store := f.getStore()
-	opts := *f.getOptions().DataOpts
 
-	m, err := webfsim.FileFromReader(ctx, store, opts, r)
+	opts := f.getOptions()
+	ctx = webref.SetCodecCtx(ctx, opts.DataOpts.Codec)
+
+	m, err := webfsim.FileFromReader(ctx, store, r)
 	if err != nil {
 		return err
 	}
@@ -80,6 +82,9 @@ func (f *File) ReadAt(p []byte, off int64) (n int, err error) {
 
 func (f *File) WriteAt(p []byte, off int64) (n int, err error) {
 	ctx := context.TODO()
+	opts := f.getOptions()
+	ctx = webref.SetCodecCtx(ctx, opts.DataOpts.Codec)
+
 	err = f.Apply(ctx, func(x webfsim.File) (*webfsim.File, error) {
 		return &x, errors.New("File.WriteAt not implemented")
 	})
@@ -91,7 +96,7 @@ func (f *File) WriteAt(p []byte, off int64) (n int, err error) {
 
 func (f *File) Append(p []byte) error {
 	ctx := context.TODO()
-	newFile, err := webfsim.FileAppend(ctx, f.getStore(), *f.getOptions().DataOpts, f.m, p)
+	newFile, err := webfsim.FileAppend(ctx, f.getStore(), f.m, p)
 	if err != nil {
 		return err
 	}
@@ -105,6 +110,17 @@ func (f *File) Size() uint64 {
 
 func (f File) String() string {
 	return "Object{File}"
+}
+
+func (f File) FileInfo() FileInfo {
+	t := time.Now().AddDate(0, 0, -1)
+	return FileInfo{
+		CreatedAt:  t,
+		ModifiedAt: t,
+		AccessedAt: t,
+		Mode:       0644,
+		Size:       f.Size(),
+	}
 }
 
 func (f *File) RefIter(ctx context.Context, fn func(webref.Ref) bool) (bool, error) {
@@ -150,7 +166,7 @@ func (f *File) Apply(ctx context.Context, fn FileMutator) error {
 	return nil
 }
 
-func refIterTree(ctx context.Context, store stores.Read, t *wrds.Tree, f func(webref.Ref) bool) (bool, error) {
+func refIterTree(ctx context.Context, store webref.Getter, t *wrds.Tree, f func(webref.Ref) bool) (bool, error) {
 	iter, err := t.Iterate(ctx, store, nil)
 	if err != nil {
 		return false, err

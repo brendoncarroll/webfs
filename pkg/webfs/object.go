@@ -16,7 +16,7 @@ func (p Path) String() string {
 	return "/" + strings.Join(p, "/")
 }
 
-func parsePath(x string) Path {
+func ParsePath(x string) Path {
 	y := []string{}
 	for _, part := range strings.Split(x, "/") {
 		switch part {

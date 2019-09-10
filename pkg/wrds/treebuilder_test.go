@@ -14,11 +14,9 @@ import (
 func TestTreeBuilder(t *testing.T) {
 	ctx := context.TODO()
 	tb := NewTreeBuilder()
-	store := stores.NewMemStore(4096)
-	opts := webref.DefaultOptions()
-	opts.Replicas[""] = 1
+	store := &webref.BasicStore{stores.NewMemStore(4096)}
 
-	dataRef, err := webref.Post(ctx, store, *opts, make([]byte, 1024))
+	dataRef, err := store.Post(ctx, make([]byte, 1024))
 	require.Nil(t, err)
 
 	const N = 1000
@@ -26,12 +24,12 @@ func TestTreeBuilder(t *testing.T) {
 		key := make([]byte, 8)
 		binary.BigEndian.PutUint64(key, uint64(i))
 
-		err := tb.Put(ctx, store, *opts, &TreeEntry{Key: key, Ref: dataRef})
+		err := tb.Put(ctx, store, &TreeEntry{Key: key, Ref: dataRef})
 		require.Nil(t, err)
 	}
 
 	t.Log(tb)
-	tree, err := tb.Finish(ctx, store, *opts)
+	tree, err := tb.Finish(ctx, store)
 	require.Nil(t, err)
 	require.NotNil(t, tree)
 	t.Log(tree)

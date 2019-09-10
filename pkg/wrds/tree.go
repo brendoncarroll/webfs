@@ -7,16 +7,17 @@ import (
 	fmt "fmt"
 	"sort"
 
-	"github.com/brendoncarroll/webfs/pkg/stores"
 	"github.com/brendoncarroll/webfs/pkg/webref"
 )
 
 type Ref = webref.Ref
-type Options = webref.Options
 
-type Post = stores.Post
-type Read = stores.Read
-type ReadPost = stores.ReadPost
+type Read = webref.Getter
+type Post = webref.Poster
+type ReadPost interface {
+	webref.Getter
+	webref.Poster
+}
 
 const (
 	// minimum entries to split
@@ -27,9 +28,9 @@ func NewTree() *Tree {
 	return &Tree{Level: 1}
 }
 
-func (t *Tree) Put(ctx context.Context, s ReadPost, opts Options, key []byte, ref *Ref) (*Tree, error) {
+func (t *Tree) Put(ctx context.Context, s ReadPost, key []byte, ref *Ref) (*Tree, error) {
 	ent := &TreeEntry{Key: key, Ref: ref}
-	newTree, err := t.put(ctx, s, opts, ent)
+	newTree, err := t.put(ctx, s, ent)
 	if err != nil {
 		return nil, err
 	}
@@ -38,7 +39,7 @@ func (t *Tree) Put(ctx context.Context, s ReadPost, opts Options, key []byte, re
 
 // Split forces the root to split.  The 2 subtrees are posted to s, and a new root is created and returned.
 // Split should be called if the containing data structure can't fit into a blob.
-func (t *Tree) Split(ctx context.Context, s Post, opts Options) (*Tree, error) {
+func (t *Tree) Split(ctx context.Context, s Post) (*Tree, error) {
 	newTree := &Tree{Level: t.Level + 1}
 
 	low, high := t.split()
@@ -47,7 +48,7 @@ func (t *Tree) Split(ctx context.Context, s Post, opts Options) (*Tree, error) {
 		st := subTrees[len(subTrees)-1]
 		subTrees = subTrees[:len(subTrees)-1]
 
-		ref, err := webref.Store(ctx, s, opts, &st)
+		ref, err := webref.EncodeAndPost(ctx, s, &st)
 		if err == webref.ErrMaxSizeExceeded {
 			if len(st.Entries) < splitMinEntries {
 				return nil, fmt.Errorf("cannot further split tree")
@@ -73,7 +74,7 @@ func (t *Tree) Split(ctx context.Context, s Post, opts Options) (*Tree, error) {
 	return newTree, nil
 }
 
-func (t *Tree) put(ctx context.Context, s stores.ReadPost, opts Options, ent *TreeEntry) (*Tree, error) {
+func (t *Tree) put(ctx context.Context, s ReadPost, ent *TreeEntry) (*Tree, error) {
 	i := t.indexPut(ent.Key)
 
 	entries := []*TreeEntry{}
@@ -86,25 +87,26 @@ func (t *Tree) put(ctx context.Context, s stores.ReadPost, opts Options, ent *Tr
 	// find subtree and recurse
 	if t.Level > 1 {
 		subTree := &Tree{}
-		err := webref.Load(ctx, s, *t.Entries[i].Ref, subTree)
+		err := webref.GetAndDecode(ctx, s, *t.Entries[i].Ref, subTree)
 		if err != nil {
 			return nil, err
 		}
 
-		subTree, err = subTree.put(ctx, s, opts, ent)
+		subTree, err = subTree.put(ctx, s, ent)
 		if err != nil {
 			return nil, err
 		}
 
 		subTrees := []Tree{*subTree}
 		// check if we need to split
-		if webref.SizeOf(s, opts, subTree) > s.MaxBlobSize() {
+		codec := webref.GetCodecCtx(ctx)
+		if webref.SizeOf(codec, subTree) > s.MaxBlobSize() {
 			low, high := subTree.split()
 			subTrees = []Tree{low, high}
 		}
 		// we either have one or 2 subtrees, post them all and convert to entries
 		for _, st := range subTrees {
-			ref, err := webref.Store(ctx, s, opts, st)
+			ref, err := webref.EncodeAndPost(ctx, s, st)
 			if err != nil {
 				return nil, err
 			}
@@ -159,7 +161,7 @@ func (t *Tree) MaxLteq(ctx context.Context, s Read, key []byte) (*TreeEntry, err
 	switch {
 	case t.Level > 1:
 		subtree := &Tree{}
-		err := webref.Load(ctx, s, *t.Entries[i].Ref, subtree)
+		err := webref.GetAndDecode(ctx, s, *t.Entries[i].Ref, subtree)
 		if err != nil {
 			return nil, err
 		}
@@ -244,11 +246,11 @@ func (t *Tree) Get(ctx context.Context, s Read, key []byte) (*TreeEntry, error) 
 	}
 }
 
-func (t *Tree) Delete(ctx context.Context, s ReadPost, opts Options, key []byte) (*Tree, error) {
-	return t.delete(ctx, s, opts, key)
+func (t *Tree) Delete(ctx context.Context, s ReadPost, key []byte) (*Tree, error) {
+	return t.delete(ctx, s, key)
 }
 
-func (t *Tree) delete(ctx context.Context, s ReadPost, opts Options, key []byte) (*Tree, error) {
+func (t *Tree) delete(ctx context.Context, s ReadPost, key []byte) (*Tree, error) {
 	// TODO: not balanced
 	i := t.indexGet(key)
 	if i < 0 {
@@ -263,11 +265,11 @@ func (t *Tree) delete(ctx context.Context, s ReadPost, opts Options, key []byte)
 			return nil, err
 		}
 
-		newSt, err := subTree.delete(ctx, s, opts, key)
+		newSt, err := subTree.delete(ctx, s, key)
 		if err != nil {
 			return nil, err
 		}
-		ref, err := webref.Store(ctx, s, opts, newSt)
+		ref, err := webref.EncodeAndPost(ctx, s, newSt)
 		if err != nil {
 			return nil, err
 		}
@@ -314,7 +316,7 @@ func (t *Tree) delete(ctx context.Context, s ReadPost, opts Options, key []byte)
 		if err != nil {
 			return nil, err
 		}
-		newSt, err := subTree.delete(ctx, s, opts, key)
+		newSt, err := subTree.delete(ctx, s, key)
 		if err != nil {
 			return nil, err
 		}
@@ -322,7 +324,7 @@ func (t *Tree) delete(ctx context.Context, s ReadPost, opts Options, key []byte)
 		newEntries := []*TreeEntry{}
 		newEntries = append(newEntries, t.Entries[:i]...)
 		if newSt != nil {
-			ref, err := webref.Store(ctx, s, opts, newSt)
+			ref, err := webref.EncodeAndPost(ctx, s, newSt)
 			if err != nil {
 				return nil, err
 			}
@@ -353,7 +355,7 @@ func (t *Tree) MaxKey(ctx context.Context, s Read) ([]byte, error) {
 		return t.Entries[l-1].Key, nil
 	case t.Level > 1:
 		subTree := &Tree{}
-		err := webref.Load(ctx, s, *t.Entries[l-1].Ref, subTree)
+		err := webref.GetAndDecode(ctx, s, *t.Entries[l-1].Ref, subTree)
 		if err != nil {
 			return nil, err
 		}
@@ -396,7 +398,7 @@ func (t *Tree) getSubtree(ctx context.Context, s Read, i int) (*Tree, error) {
 	ent := t.Entries[i]
 	subtree := &Tree{}
 
-	err := webref.Load(ctx, s, *ent.Ref, subtree)
+	err := webref.GetAndDecode(ctx, s, *ent.Ref, subtree)
 	if err != nil {
 		return nil, err
 	}

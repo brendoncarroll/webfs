@@ -2,22 +2,82 @@ package webfs
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"log"
 
 	"github.com/brendoncarroll/webfs/pkg/stores"
-	"github.com/brendoncarroll/webfs/pkg/webfsim"
-
 	"github.com/brendoncarroll/webfs/pkg/stores/httpstore"
 	"github.com/brendoncarroll/webfs/pkg/stores/ipfsstore"
+	"github.com/brendoncarroll/webfs/pkg/webfsim"
+	"github.com/brendoncarroll/webfs/pkg/webref"
 )
 
 type Store struct {
-	parent *Store
+	get    webref.Getter
+	post   webref.Poster
 	router *stores.Router
 }
 
-func newStore(parent *Store, specs []*webfsim.StoreSpec) (*Store, error) {
+func (s *Store) Get(ctx context.Context, ref *webref.Ref) ([]byte, error) {
+	return s.get.Get(ctx, ref)
+}
+
+func (s *Store) Post(ctx context.Context, data []byte) (*Ref, error) {
+	return s.post.Post(ctx, data)
+}
+
+func (s *Store) MaxBlobSize() int {
+	return s.post.MaxBlobSize()
+}
+
+func (s *Store) Check(ctx context.Context, ref *webref.Ref) []webref.RefStatus {
+	checker, ok := s.get.(webref.Checker)
+	if !ok {
+		_, err := s.get.Get(ctx, ref)
+		return []webref.RefStatus{
+			{Error: err},
+		}
+	}
+	return checker.Check(ctx, ref)
+}
+
+func (s *Store) Delete(ctx context.Context, ref *webref.Ref) error {
+	deleter, ok := s.post.(webref.Deleter)
+	if !ok {
+		return nil
+	}
+	return deleter.Delete(ctx, ref)
+}
+
+func BuildStore(specs []*webfsim.StoreSpec, o *webfsim.WriteOptions) (*Store, error) {
+	router, err := newRouter(specs)
+	if err != nil {
+		return nil, err
+	}
+	prefixes := []string{}
+	for prefix, n := range o.Replicas {
+		prefixes = append(prefixes, prefix)
+		if n > 1 {
+			log.Println("WARN: multiple replicas per prefix not yet supported")
+		}
+	}
+	s := &Store{
+		router: router,
+		post: &webref.CryptoStore{
+			Inner: &webref.SpreadStore{
+				Store:    router,
+				Prefixes: prefixes,
+			},
+			EncAlgo:    o.EncAlgo,
+			SecretSeed: o.SecretSeed,
+		},
+		get: webref.NewCache(&webref.BasicStore{Store: router}),
+	}
+
+	return s, nil
+}
+
+func newRouter(specs []*webfsim.StoreSpec) (*stores.Router, error) {
 	routes := make([]stores.StoreRoute, len(specs))
 	for i, spec := range specs {
 		var s stores.ReadPost
@@ -39,84 +99,5 @@ func newStore(parent *Store, specs []*webfsim.StoreSpec) (*Store, error) {
 			Store:  s,
 		}
 	}
-
-	return &Store{
-		parent: parent,
-		router: stores.NewRouter(routes),
-	}, nil
-}
-
-func (s *Store) getStore(key string) (stores.Read, error) {
-	store := s.router.LookupStore(key)
-	switch {
-	case store != nil:
-		return store, nil
-	case store == nil && s.parent != nil:
-		return s.parent.getStore(key)
-	default:
-		return nil, fmt.Errorf("could not find store for key: %s", key)
-	}
-}
-
-func (s *Store) getWriteStore(prefix string) (stores.Post, error) {
-	store, err := s.getStore(prefix)
-	if err != nil {
-		return nil, err
-	}
-	if wstore, ok := store.(stores.ReadPost); ok {
-		return wstore, nil
-	}
-	return nil, errors.New("no writeable store")
-}
-
-func (s *Store) Post(ctx context.Context, prefix string, data []byte) (string, error) {
-	store, err := s.getWriteStore(prefix)
-	if err != nil {
-		return "", err
-	}
-	return store.Post(ctx, prefix, data)
-}
-
-func (s *Store) Get(ctx context.Context, key string) ([]byte, error) {
-	store, err := s.getStore(key)
-	if err != nil {
-		return nil, err
-	}
-	return store.Get(ctx, key)
-}
-
-func (s *Store) MaxBlobSize() int {
-	x := s.router.MaxBlobSize()
-	if x == 0 && s.parent != nil {
-		return s.parent.MaxBlobSize()
-	}
-	if s.parent == nil {
-		return x
-	}
-	parentMbs := s.parent.MaxBlobSize()
-	if parentMbs == 0 {
-		return x
-	}
-	return min(x, parentMbs)
-}
-
-func (s *Store) Check(ctx context.Context, key string) error {
-	store, err := s.getStore(key)
-	if err != nil {
-		return err
-	}
-	checkStore, ok := store.(stores.Check)
-	if !ok {
-		panic("not ok")
-		_, err := store.Get(ctx, key)
-		return err
-	}
-	return checkStore.Check(ctx, key)
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
+	return stores.NewRouter(routes), nil
 }

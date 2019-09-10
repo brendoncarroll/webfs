@@ -20,7 +20,7 @@ func NewTreeBuilder() *TreeBuilder {
 	}
 }
 
-func (tb *TreeBuilder) Put(ctx context.Context, s ReadPost, opts webref.Options, ent *TreeEntry) error {
+func (tb *TreeBuilder) Put(ctx context.Context, s ReadPost, ent *TreeEntry) error {
 	if bytes.Compare(ent.Key, tb.lastKey) <= 0 {
 		log.Println("new key:", ent.Key, "last key:", tb.lastKey)
 		panic("tree builder: Put called with out of order key")
@@ -35,7 +35,8 @@ func (tb *TreeBuilder) Put(ctx context.Context, s ReadPost, opts webref.Options,
 
 		// try to insert to current tree
 		t.Entries = append(t.Entries, ent)
-		if webref.SizeOf(s, opts, t) < s.MaxBlobSize() {
+		codec := webref.GetCodecCtx(ctx)
+		if webref.SizeOf(codec, t) < s.MaxBlobSize() {
 			break
 		}
 
@@ -49,7 +50,7 @@ func (tb *TreeBuilder) Put(ctx context.Context, s ReadPost, opts webref.Options,
 
 		// store the last tree
 		key := t.MinKey()
-		ref, err := webref.Store(ctx, s, opts, t)
+		ref, err := webref.EncodeAndPost(ctx, s, t)
 		if err != nil {
 			return err
 		}
@@ -67,7 +68,7 @@ func (tb *TreeBuilder) Put(ctx context.Context, s ReadPost, opts webref.Options,
 	return nil
 }
 
-func (tb *TreeBuilder) Finish(ctx context.Context, store ReadPost, opts Options) (*Tree, error) {
+func (tb *TreeBuilder) Finish(ctx context.Context, store ReadPost) (*Tree, error) {
 	if tb.isDone {
 		panic("Finish called twice")
 	}
@@ -78,7 +79,8 @@ func (tb *TreeBuilder) Finish(ctx context.Context, store ReadPost, opts Options)
 		if ent != nil {
 			t.Entries = append(t.Entries, ent)
 		}
-		ref, err := webref.Store(ctx, store, opts, t)
+
+		ref, err := webref.EncodeAndPost(ctx, store, t)
 		if err != nil {
 			return nil, err
 		}

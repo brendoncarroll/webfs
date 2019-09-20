@@ -30,8 +30,10 @@ The key given by the store should be related to the data cryptographically.
 For example, an FTP server would make a fine store, provided the files are named with the hash of their contents.
 IPFS paths provide this guarentee.
 
+Store implementations can be found in `pkg/stores`
+
 ### Cells
-Cells in WebFS are like cells in a spreadsheet, a single piece of data that can change over time.
+Cells in WebFS are like cells in a spreadsheet, a holder of a data which can change over time.
 The compare-and-swap operation (`CAS(current, next)`) allows writes which will be synchronized with other WebFS instances writing to the same cell.
 
 Cells provide two operations:
@@ -39,6 +41,8 @@ Cells provide two operations:
 Get() (data []byte, err error)
 CAS(current, next []byte) (success bool, err error)
 ```
+
+Cell implementations can be found in `pkg/cells`
 
 ### Data Model
 WebFS takes a typical copy-on-write merkle tree approach similar to git or IPFS.  There are 3 objects that make up the data model.
@@ -53,3 +57,9 @@ A Volume wraps a cell implementation.
 All of the configuration in WebFS is modelled as objects in the file system.
 Everything needed to start a WebFS instance is contained a file called the "superblock".
 The superblock is just a `Cell` implemented as a single file on disk.
+
+The model is analagous to a web of git repositories/submodules (similar to WebFS volumes).
+WebFS directories are similar to git trees.
+The main difference is that WebFS files and directories do not have one to one mappings with blobs.
+Instead, they are tree structures that span multiple blobs.
+This allows them to support much larger files than is practical in git.

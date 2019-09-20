@@ -63,3 +63,23 @@ WebFS directories are similar to git trees.
 The main difference is that WebFS files and directories do not have one to one mappings with blobs.
 Instead, they are tree structures that span multiple blobs.
 This allows them to support much larger files than is practical in git.
+
+## Goals/Roadmap
+- FUSE Adapter
+- Snapshots. Transform `Volume`s into snapshot objects recursively and output a root snapshot.
+- RAID, Reed-Solomon, Compression `Webref`s
+- Check/Scrub. To repair or move data as needed.
+This will enable easy migrations between storage providers.
+Changing store-A to 0 replicas and store-B to 1 replica and running scrub should be all that's required.
+- Sharded and Union Directories (across multiple cells)
+- Gain adoption by data-curators.
+Become a sound way to distribute large datasets which update over time.
+- Create a simple workflow for group archiving.
+- High quality CLI UX
+- Create a more competitive market for file storage and synchronization, by reducing the problem to a implementing a `Store` or `Cell`.
+
+Contributions are welcome
+
+## Non-Goals
+- Create p2p network based `Store` or `Cell`, which runs in the WebFS process.
+Those should run separately and expose an API which this project will be eager to integrate.

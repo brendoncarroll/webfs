@@ -2,22 +2,22 @@ package webfs
 
 import (
 	"github.com/brendoncarroll/webfs/pkg/stores/ipfsstore"
-	"github.com/brendoncarroll/webfs/pkg/webfs/models"
+	"github.com/brendoncarroll/webfs/pkg/webfsim"
 	"github.com/brendoncarroll/webfs/pkg/webref"
 )
 
-type Options = models.Options
+type Options = webfsim.Options
 
 func DefaultOptions() *Options {
 	dataOpts := webref.DefaultOptions()
 
 	return &Options{
 		DataOpts: dataOpts,
-		StoreSpecs: []*models.StoreSpec{
+		StoreSpecs: []*webfsim.StoreSpec{
 			{
 				Prefix: "ipfs://",
-				Spec: &models.StoreSpec_Ipfs{
-					Ipfs: &models.IPFSStoreSpec{
+				Spec: &webfsim.StoreSpec_Ipfs{
+					Ipfs: &webfsim.IPFSStoreSpec{
 						Endpoint: ipfsstore.DefaultLocalURL,
 					},
 				},

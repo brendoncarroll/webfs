@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package ccp;
 
-option go_package = "github.com/brendoncarroll/webfs/pkg/cells/cryptocell";
+option go_package = "github.com/brendoncarroll/webfs/pkg/cells/rwacryptocell";
 
 enum EncAlgo {
     UNKNOWN_EA = 0;

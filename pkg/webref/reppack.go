@@ -10,7 +10,7 @@ import (
 	"github.com/brendoncarroll/webfs/pkg/stores"
 )
 
-func PostRepPack(ctx context.Context, store stores.WriteOnce, o Options, data []byte) (*RepPackRef, error) {
+func PostRepPack(ctx context.Context, store stores.Post, o Options, data []byte) (*RepPackRef, error) {
 	refs := []*RepPackRef{}
 	if len(o.Replicas) == 0 {
 		return nil, fmt.Errorf("no prefixes to post to")
@@ -91,4 +91,25 @@ func GetMirror(ctx context.Context, s stores.Read, m *Mirror) ([]byte, error) {
 		count++
 	}
 	return nil, fmt.Errorf("Errors from all replicas")
+}
+
+func DeleteRepPack(ctx context.Context, s stores.Delete, r *RepPackRef) error {
+	switch r2 := r.Ref.(type) {
+	case *RepPackRef_Single:
+		return DeleteCrypto(ctx, s, r2.Single)
+	case *RepPackRef_Slice:
+		return DeleteCrypto(ctx, s, r2.Slice.Ref)
+	case *RepPackRef_Mirror:
+		return DeleteMirror(ctx, s, r2.Mirror)
+	}
+	return nil
+}
+
+func DeleteMirror(ctx context.Context, s stores.Delete, r *Mirror) error {
+	for _, x := range r.Replicas {
+		if err := DeleteRepPack(ctx, s, x); err != nil {
+			return err
+		}
+	}
+	return nil
 }

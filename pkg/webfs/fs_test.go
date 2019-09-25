@@ -14,7 +14,7 @@ import (
 	"github.com/brendoncarroll/webfs/pkg/cells/httpcell"
 	"github.com/brendoncarroll/webfs/pkg/cells/memcell"
 	"github.com/brendoncarroll/webfs/pkg/stores"
-	"github.com/brendoncarroll/webfs/pkg/webfs/models"
+	"github.com/brendoncarroll/webfs/pkg/webfsim"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -136,10 +136,10 @@ func TestNewVolume(t *testing.T) {
 	require.Nil(t, err)
 
 	p := "/testvol"
-	vs := models.VolumeSpec{
-		CellSpec: &models.CellSpec{
-			Spec: &models.CellSpec_Http{
-				Http: &models.HTTPCellSpec{
+	vs := webfsim.VolumeSpec{
+		CellSpec: &webfsim.CellSpec{
+			Spec: &webfsim.CellSpec_Http{
+				Http: &webfsim.HTTPCellSpec{
 					Url: spec.URL,
 				},
 			},

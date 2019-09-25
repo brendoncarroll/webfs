@@ -14,9 +14,9 @@ import (
 type Ref = webref.Ref
 type Options = webref.Options
 
-type WriteOnce = stores.WriteOnce
+type Post = stores.Post
 type Read = stores.Read
-type ReadWriteOnce = stores.ReadWriteOnce
+type ReadPost = stores.ReadPost
 
 const (
 	// minimum entries to split
@@ -27,7 +27,7 @@ func NewTree() *Tree {
 	return &Tree{Level: 1}
 }
 
-func (t *Tree) Put(ctx context.Context, s ReadWriteOnce, opts Options, key []byte, ref *Ref) (*Tree, error) {
+func (t *Tree) Put(ctx context.Context, s ReadPost, opts Options, key []byte, ref *Ref) (*Tree, error) {
 	ent := &TreeEntry{Key: key, Ref: ref}
 	newTree, err := t.put(ctx, s, opts, ent)
 	if err != nil {
@@ -38,7 +38,7 @@ func (t *Tree) Put(ctx context.Context, s ReadWriteOnce, opts Options, key []byt
 
 // Split forces the root to split.  The 2 subtrees are posted to s, and a new root is created and returned.
 // Split should be called if the containing data structure can't fit into a blob.
-func (t *Tree) Split(ctx context.Context, s WriteOnce, opts Options) (*Tree, error) {
+func (t *Tree) Split(ctx context.Context, s Post, opts Options) (*Tree, error) {
 	newTree := &Tree{Level: t.Level + 1}
 
 	low, high := t.split()
@@ -73,7 +73,7 @@ func (t *Tree) Split(ctx context.Context, s WriteOnce, opts Options) (*Tree, err
 	return newTree, nil
 }
 
-func (t *Tree) put(ctx context.Context, s stores.ReadWriteOnce, opts Options, ent *TreeEntry) (*Tree, error) {
+func (t *Tree) put(ctx context.Context, s stores.ReadPost, opts Options, ent *TreeEntry) (*Tree, error) {
 	i := t.indexPut(ent.Key)
 
 	entries := []*TreeEntry{}
@@ -172,25 +172,52 @@ func (t *Tree) MaxLteq(ctx context.Context, s Read, key []byte) (*TreeEntry, err
 	}
 }
 
+// MinGt (After)
 func (t *Tree) MinGt(ctx context.Context, s Read, key []byte) (*TreeEntry, error) {
-	i := sort.Search(len(t.Entries), func(i int) bool {
-		return bytes.Compare(t.Entries[i].Key, key) > 0
-	})
-	switch {
-	case i == len(t.Entries):
-		return nil, nil
-	case t.Level > 1:
-		st, err := t.getSubtree(ctx, s, i)
-		if err != nil {
-			return nil, err
+	i := 0
+	// find the max index with at least 1 key
+	// TODO: binary search
+	for ; i < len(t.Entries); i++ {
+		if bytes.Compare(t.Entries[i].Key, key) > 0 {
+			break
 		}
-		return st.MinGt(ctx, s, key)
-	default:
-		ent := t.Entries[i]
-		return ent, nil
 	}
 
-	return nil, nil
+	lt := i - 1
+	gt := i
+	switch {
+	case t.Level == 1 && gt < len(t.Entries):
+		return t.Entries[gt], nil
+	case t.Level == 1 && gt >= len(t.Entries):
+		return nil, nil
+	case t.Level > 1:
+		var ret *TreeEntry
+		if lt >= 0 {
+			st, err := t.getSubtree(ctx, s, lt)
+			if err != nil {
+				return nil, err
+			}
+			ent, err := st.MinGt(ctx, s, key)
+			if err != nil {
+				return nil, err
+			}
+			ret = ent
+		}
+		if ret == nil && gt < len(t.Entries) {
+			st, err := t.getSubtree(ctx, s, gt)
+			if err != nil {
+				return nil, err
+			}
+			ent, err := st.MinGt(ctx, s, key)
+			if err != nil {
+				return nil, err
+			}
+			ret = ent
+		}
+		return ret, nil
+	default:
+		return nil, errors.New("invalid tree")
+	}
 }
 
 func (t *Tree) Get(ctx context.Context, s Read, key []byte) (*TreeEntry, error) {
@@ -217,11 +244,11 @@ func (t *Tree) Get(ctx context.Context, s Read, key []byte) (*TreeEntry, error) 
 	}
 }
 
-func (t *Tree) Delete(ctx context.Context, s ReadWriteOnce, opts Options, key []byte) (*Tree, error) {
+func (t *Tree) Delete(ctx context.Context, s ReadPost, opts Options, key []byte) (*Tree, error) {
 	return t.delete(ctx, s, opts, key)
 }
 
-func (t *Tree) delete(ctx context.Context, s ReadWriteOnce, opts Options, key []byte) (*Tree, error) {
+func (t *Tree) delete(ctx context.Context, s ReadPost, opts Options, key []byte) (*Tree, error) {
 	// TODO: not balanced
 	i := t.indexGet(key)
 	if i < 0 {

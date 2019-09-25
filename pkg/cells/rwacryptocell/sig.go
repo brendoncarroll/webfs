@@ -1,4 +1,4 @@
-package cryptocell
+package rwacryptocell
 
 import (
 	"crypto/sha256"

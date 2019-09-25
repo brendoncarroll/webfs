@@ -9,7 +9,7 @@ import (
 	"github.com/golang/protobuf/jsonpb"
 
 	"github.com/brendoncarroll/webfs/pkg/cells"
-	"github.com/brendoncarroll/webfs/pkg/webfs/models"
+	"github.com/brendoncarroll/webfs/pkg/webfsim"
 	"github.com/brendoncarroll/webfs/pkg/webref"
 )
 
@@ -19,11 +19,11 @@ var ErrCASFailed = errors.New("CAS failed. Should Retry")
 
 type Cell = cells.Cell
 
-type VolumeMutator func(models.Commit) (*models.Commit, error)
-type ObjectMutator func(*models.Object) (*models.Object, error)
+type VolumeMutator func(webfsim.Commit) (*webfsim.Commit, error)
+type ObjectMutator func(*webfsim.Object) (*webfsim.Object, error)
 
 type Volume struct {
-	spec *models.VolumeSpec
+	spec *webfsim.VolumeSpec
 	cell Cell
 	opts *Options
 
@@ -73,7 +73,10 @@ func (v *Volume) Walk(ctx context.Context, f func(Object) bool) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	mo := models.Object{}
+	if cc.ObjectRef == nil {
+		return true, nil
+	}
+	mo := webfsim.Object{}
 	s := v.getStore()
 	if err := webref.Load(ctx, s, *cc.ObjectRef, &mo); err != nil {
 		return false, err
@@ -87,7 +90,7 @@ func (v *Volume) Walk(ctx context.Context, f func(Object) bool) (bool, error) {
 }
 
 func (v *Volume) ChangeOptions(ctx context.Context, fn func(x *Options) *Options) error {
-	return v.Apply(ctx, func(cx models.Commit) (*models.Commit, error) {
+	return v.Apply(ctx, func(cx webfsim.Commit) (*webfsim.Commit, error) {
 		yx := cx
 		yx.Options = fn(cx.Options)
 		return &yx, nil
@@ -95,29 +98,29 @@ func (v *Volume) ChangeOptions(ctx context.Context, fn func(x *Options) *Options
 }
 
 func (v *Volume) SetOptions(ctx context.Context, opts *Options) error {
-	return v.Apply(ctx, func(cx models.Commit) (*models.Commit, error) {
+	return v.Apply(ctx, func(cx webfsim.Commit) (*webfsim.Commit, error) {
 		yx := cx
 		yx.Options = opts
 		return &yx, nil
 	})
 }
 
-func (v *Volume) Get(ctx context.Context) (*models.Commit, error) {
+func (v *Volume) Get(ctx context.Context) (*webfsim.Commit, error) {
 	return v.get(ctx)
 }
 
-func (v *Volume) get(ctx context.Context) (*models.Commit, error) {
+func (v *Volume) get(ctx context.Context) (*webfsim.Commit, error) {
 	data, err := v.cell.Get(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if len(data) < 1 {
-		return &models.Commit{
+		return &webfsim.Commit{
 			Options: DefaultOptions(),
 		}, nil
 	}
 
-	m := models.Commit{}
+	m := webfsim.Commit{}
 	if err := webref.Decode(webref.CodecJSON, data, &m); err != nil {
 		return nil, err
 	}
@@ -133,7 +136,7 @@ func (v *Volume) getObject(ctx context.Context) (Object, error) {
 	if m.ObjectRef == nil {
 		return nil, nil
 	}
-	mo := models.Object{}
+	mo := webfsim.Object{}
 	s := v.getStore()
 	if err := webref.Load(ctx, s, *m.ObjectRef, &mo); err != nil {
 		return nil, err
@@ -142,10 +145,10 @@ func (v *Volume) getObject(ctx context.Context) (Object, error) {
 }
 
 func (v *Volume) put(ctx context.Context, fn ObjectMutator) error {
-	return v.Apply(ctx, func(cur models.Commit) (*models.Commit, error) {
-		var o *models.Object
+	return v.Apply(ctx, func(cur webfsim.Commit) (*webfsim.Commit, error) {
+		var o *webfsim.Object
 		if cur.ObjectRef != nil {
-			o = &models.Object{}
+			o = &webfsim.Object{}
 			s := v.getStore()
 			if err := webref.Load(ctx, s, *cur.ObjectRef, o); err != nil {
 				return nil, err
@@ -162,7 +165,7 @@ func (v *Volume) put(ctx context.Context, fn ObjectMutator) error {
 			return nil, err
 		}
 
-		next := models.Commit{
+		next := webfsim.Commit{
 			ObjectRef: ref,
 			Options:   cur.Options,
 		}
@@ -178,7 +181,7 @@ func (v *Volume) Apply(ctx context.Context, f VolumeMutator) error {
 		if err != nil {
 			return err
 		}
-		curV := models.Commit{}
+		curV := webfsim.Commit{}
 		if len(cur) > 0 {
 			if err := webref.Decode(VolumeCodec, cur, &curV); err != nil {
 				return err
@@ -279,7 +282,7 @@ func (v *Volume) getOptions() *Options {
 }
 
 func (v *Volume) init(ctx context.Context) error {
-	err := v.Apply(ctx, func(x models.Commit) (*models.Commit, error) {
+	err := v.Apply(ctx, func(x webfsim.Commit) (*webfsim.Commit, error) {
 		y := x
 		if y.Options == nil {
 			y.Options = DefaultOptions()
@@ -318,9 +321,9 @@ func (v *Volume) updateSpec(ctx context.Context) error {
 		panic("invalid parent")
 	}
 
-	return put(ctx, func(x *models.Object) (*models.Object, error) {
-		y := &models.Object{
-			Value: &models.Object_Volume{
+	return put(ctx, func(x *webfsim.Object) (*webfsim.Object, error) {
+		y := &webfsim.Object{
+			Value: &webfsim.Object_Volume{
 				Volume: volSpec,
 			},
 		}

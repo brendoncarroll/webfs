@@ -29,7 +29,7 @@ func Load(ctx context.Context, s stores.Read, ref Ref, x interface{}) error {
 	return Decode(codec, data, x)
 }
 
-func Store(ctx context.Context, s stores.WriteOnce, opts Options, x interface{}) (*Ref, error) {
+func Store(ctx context.Context, s stores.Post, opts Options, x interface{}) (*Ref, error) {
 	codec := opts.Attrs["codec"]
 	if codec == "" {
 		codec = CodecJSON
@@ -50,7 +50,7 @@ func Store(ctx context.Context, s stores.WriteOnce, opts Options, x interface{})
 	return ref, nil
 }
 
-func SizeOf(s stores.WriteOnce, o Options, x interface{}) int {
+func SizeOf(s stores.Post, o Options, x interface{}) int {
 	codec := o.Attrs["codec"]
 	switch codec {
 	case CodecProtobuf:

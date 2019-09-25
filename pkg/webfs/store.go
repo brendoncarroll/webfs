@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/brendoncarroll/webfs/pkg/stores"
-	"github.com/brendoncarroll/webfs/pkg/webfs/models"
+	"github.com/brendoncarroll/webfs/pkg/webfsim"
 
 	"github.com/brendoncarroll/webfs/pkg/stores/httpstore"
 	"github.com/brendoncarroll/webfs/pkg/stores/ipfsstore"
@@ -17,19 +17,15 @@ type Store struct {
 	router *stores.Router
 }
 
-func newStore(parent *Store, specs []*models.StoreSpec) (*Store, error) {
-	var err error
+func newStore(parent *Store, specs []*webfsim.StoreSpec) (*Store, error) {
 	routes := make([]stores.StoreRoute, len(specs))
 	for i, spec := range specs {
-		var s stores.ReadWriteOnce
+		var s stores.ReadPost
 		switch x := spec.Spec.(type) {
-		case *models.StoreSpec_Http:
+		case *webfsim.StoreSpec_Http:
 			s = httpstore.New(x.Http.Endpoint, x.Http.Prefix)
-		case *models.StoreSpec_Ipfs:
-			s, err = ipfsstore.New(x.Ipfs.Endpoint)
-			if err != nil {
-				return nil, err
-			}
+		case *webfsim.StoreSpec_Ipfs:
+			s = ipfsstore.New(x.Ipfs.Endpoint)
 		default:
 			return nil, fmt.Errorf("bad spec %v", spec)
 		}
@@ -46,21 +42,24 @@ func newStore(parent *Store, specs []*models.StoreSpec) (*Store, error) {
 	}, nil
 }
 
-func (s *Store) getStore(key string) stores.Read {
+func (s *Store) getStore(key string) (stores.Read, error) {
 	store := s.router.LookupStore(key)
 	switch {
 	case store != nil:
-		return store
+		return store, nil
 	case store == nil && s.parent != nil:
 		return s.parent.getStore(key)
 	default:
-		return nil
+		return nil, fmt.Errorf("could not find store for key: %s", key)
 	}
 }
 
-func (s *Store) getWriteStore(prefix string) (stores.WriteOnce, error) {
-	store := s.getStore(prefix)
-	if wstore, ok := store.(stores.ReadWriteOnce); ok {
+func (s *Store) getWriteStore(prefix string) (stores.Post, error) {
+	store, err := s.getStore(prefix)
+	if err != nil {
+		return nil, err
+	}
+	if wstore, ok := store.(stores.ReadPost); ok {
 		return wstore, nil
 	}
 	return nil, errors.New("no writeable store")
@@ -75,7 +74,11 @@ func (s *Store) Post(ctx context.Context, prefix string, data []byte) (string, e
 }
 
 func (s *Store) Get(ctx context.Context, key string) ([]byte, error) {
-	return s.getStore(key).Get(ctx, key)
+	store, err := s.getStore(key)
+	if err != nil {
+		return nil, err
+	}
+	return store.Get(ctx, key)
 }
 
 func (s *Store) MaxBlobSize() int {

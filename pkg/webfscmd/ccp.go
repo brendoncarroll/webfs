@@ -1,7 +1,7 @@
 package webfscmd
 
 import (
-	"github.com/brendoncarroll/webfs/pkg/cells/cryptocell"
+	"github.com/brendoncarroll/webfs/pkg/cells/rwacryptocell"
 	"github.com/golang/protobuf/jsonpb"
 	"github.com/spf13/cobra"
 )
@@ -21,7 +21,7 @@ var ccpKeyGen = &cobra.Command{
 	Short: "generate a new key",
 	Use:   "key-gen",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		privEnt, err := cryptocell.GenerateEntity()
+		privEnt, err := rwacryptocell.GenerateEntity()
 		if err != nil {
 			return err
 		}

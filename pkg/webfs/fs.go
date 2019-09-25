@@ -13,7 +13,7 @@ import (
 	"github.com/brendoncarroll/webfs/pkg/cells"
 	"github.com/brendoncarroll/webfs/pkg/cells/httpcell"
 	"github.com/brendoncarroll/webfs/pkg/stores"
-	"github.com/brendoncarroll/webfs/pkg/webfs/models"
+	"github.com/brendoncarroll/webfs/pkg/webfsim"
 	"github.com/brendoncarroll/webfs/pkg/webref"
 )
 
@@ -27,10 +27,10 @@ type WebFS struct {
 	root      *Volume
 	volumes   sync.Map
 	cells     sync.Map
-	baseStore stores.ReadWriteOnce
+	baseStore stores.ReadPost
 }
 
-func New(rootCell Cell, baseStore stores.ReadWriteOnce) (*WebFS, error) {
+func New(rootCell Cell, baseStore stores.ReadPost) (*WebFS, error) {
 	wfs := &WebFS{
 		volumes:   sync.Map{},
 		cells:     sync.Map{},
@@ -40,7 +40,7 @@ func New(rootCell Cell, baseStore stores.ReadWriteOnce) (*WebFS, error) {
 	wfs.addCell(rootCell)
 
 	rv := &Volume{
-		spec: &models.VolumeSpec{
+		spec: &webfsim.VolumeSpec{
 			Id: RootVolumeID,
 		},
 		cell: rootCell,
@@ -237,13 +237,13 @@ func (wfs *WebFS) RefIter(ctx context.Context, f func(ref webref.Ref) bool) erro
 	return topErr
 }
 
-func (wfs *WebFS) NewVolume(ctx context.Context, p string, spec models.VolumeSpec) (string, error) {
+func (wfs *WebFS) NewVolume(ctx context.Context, p string, spec webfsim.VolumeSpec) (string, error) {
 	if spec.Id == "" {
 		spec.Id = generateVolId()
 	}
 	var cell cells.Cell
 	switch x := spec.CellSpec.Spec.(type) {
-	case *models.CellSpec_Http:
+	case *webfsim.CellSpec_Http:
 		spec2 := httpcell.Spec{
 			URL:        x.Http.Url,
 			AuthHeader: x.Http.AuthHeader,
@@ -258,15 +258,15 @@ func (wfs *WebFS) NewVolume(ctx context.Context, p string, spec models.VolumeSpe
 		return "", errors.New("could not access cell")
 	}
 
-	v := models.Object{
-		Value: &models.Object_Volume{
+	v := webfsim.Object{
+		Value: &webfsim.Object_Volume{
 			Volume: &spec,
 		},
 	}
 	return spec.Id, wfs.putAt(ctx, parsePath(p), v)
 }
 
-func (wfs *WebFS) putAt(ctx context.Context, p Path, o models.Object) error {
+func (wfs *WebFS) putAt(ctx context.Context, p Path, o webfsim.Object) error {
 	parent, err := wfs.lookupParent(ctx, p)
 	if err != nil {
 		return err
@@ -291,7 +291,7 @@ func (wfs *WebFS) putAt(ctx context.Context, p Path, o models.Object) error {
 	default:
 		panic("lookup returned file")
 	}
-	err = put(ctx, func(cur *models.Object) (*models.Object, error) {
+	err = put(ctx, func(cur *webfsim.Object) (*webfsim.Object, error) {
 		if cur != nil {
 			return nil, errors.New("object already here")
 		}
@@ -340,7 +340,7 @@ func (wfs *WebFS) getCellByURL(id string) Cell {
 	return cell.(Cell)
 }
 
-func (wfs *WebFS) setupCell(spec *models.VolumeSpec) (Cell, error) {
+func (wfs *WebFS) setupCell(spec *webfsim.VolumeSpec) (Cell, error) {
 	newCell, err := model2Cell(spec.CellSpec)
 	if err != nil {
 		return nil, err

@@ -1,4 +1,4 @@
-package cryptocell
+package rwacryptocell
 
 import (
 	"errors"
@@ -162,6 +162,7 @@ func createWhat(prev *CellContents, signer *Key, data []byte) (*What, error) {
 	what := &What{
 		Deks:    deks,
 		Payload: encMsg,
+		Gen:     prevWhat.Gen + 1,
 	}
 
 	return what, nil

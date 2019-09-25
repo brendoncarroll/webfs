@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package ccp;
 
-option go_package = "github.com/brendoncarroll/webfs/pkg/cells/cryptocell";
+option go_package = "github.com/brendoncarroll/webfs/pkg/cells/rwacryptocell";
 
 import "crypto.proto";
 
@@ -22,9 +22,12 @@ message Who {
     repeated int32 admin = 2;
     repeated int32 write = 3;
     repeated int32 read = 4;
+
+    int64 gen = 5;
 }
 
 message What {
     EncMsg payload = 1;
     repeated AsymEncMsg deks = 2;
+    int64 gen = 3;
 }

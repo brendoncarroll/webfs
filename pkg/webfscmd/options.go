@@ -5,7 +5,7 @@ import (
 	"io"
 	"io/ioutil"
 
-	"github.com/brendoncarroll/webfs/pkg/webfs/models"
+	"github.com/brendoncarroll/webfs/pkg/webfsim"
 	"github.com/golang/protobuf/jsonpb"
 	"github.com/golang/protobuf/proto"
 	"github.com/spf13/cobra"
@@ -34,7 +34,7 @@ var setOptsCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		opts := &models.Options{}
+		opts := &webfsim.Options{}
 		if err = decode(data, opts); err != nil {
 			return err
 		}

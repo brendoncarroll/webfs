@@ -1,4 +1,4 @@
-package cryptocell
+package rwacryptocell
 
 import (
 	"bytes"
@@ -95,12 +95,8 @@ func (c *Cell) CAS(ctx context.Context, cur, next []byte) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	success, err := c.cas(ctx, curContents, nextContents)
-	if err != nil {
-		return false, err
-	}
 
-	return success, nil
+	return c.cas(ctx, curContents, nextContents)
 }
 
 func (c *Cell) cas(ctx context.Context, curContents, nextContents *CellContents) (bool, error) {
@@ -112,7 +108,15 @@ func (c *Cell) cas(ctx context.Context, curContents, nextContents *CellContents)
 	if err != nil {
 		return false, err
 	}
-	return c.innerCell.CAS(ctx, curBytes, nextBytes)
+
+	success, err := c.innerCell.CAS(ctx, curBytes, nextBytes)
+	if err != nil {
+		return false, err
+	}
+	if success {
+		c.updateLatest(nextContents, nextBytes)
+	}
+	return success, nil
 }
 
 func (c *Cell) GetSpec() interface{} {

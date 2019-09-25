@@ -4,7 +4,7 @@ import (
 	"errors"
 	"io/ioutil"
 
-	"github.com/brendoncarroll/webfs/pkg/webfs/models"
+	"github.com/brendoncarroll/webfs/pkg/webfsim"
 	"github.com/brendoncarroll/webfs/pkg/webref"
 	"github.com/spf13/cobra"
 )
@@ -40,7 +40,7 @@ var newVol = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		spec := models.VolumeSpec{}
+		spec := webfsim.VolumeSpec{}
 
 		if err := webref.Decode(webref.CodecJSON, data, &spec); err != nil {
 			return err

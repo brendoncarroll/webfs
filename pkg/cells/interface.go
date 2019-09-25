@@ -9,6 +9,5 @@ type Cell interface {
 }
 
 type GetSpec interface {
-	Cell
 	GetSpec() interface{}
 }

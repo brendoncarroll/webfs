@@ -12,6 +12,7 @@ require (
 	github.com/lestrrat-go/jwx v0.9.0
 	github.com/lestrrat/go-jwx v0.0.0-20180221005942-b7d4802280ae
 	github.com/lestrrat/go-pdebug v0.0.0-20180220043741-569c97477ae8 // indirect
+	github.com/multiformats/go-multihash v0.0.1
 	github.com/ncw/rclone v1.48.0
 	github.com/spf13/afero v1.2.2
 	github.com/spf13/cobra v0.0.5

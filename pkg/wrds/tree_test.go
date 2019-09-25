@@ -55,3 +55,30 @@ func TestPutGet(t *testing.T) {
 		}
 	}
 }
+
+func TestMinGt(t *testing.T) {
+	const N = 1000
+	s := stores.NewMemStore(4096)
+	opts := *webref.DefaultOptions()
+
+	tree := NewTree()
+	var err error
+	for i := 0; i < N; i++ {
+		key := []byte(fmt.Sprintf("key%03d", i))
+		ref := &webref.Ref{}
+		tree, err = tree.Put(ctx, s, opts, key, ref)
+		require.Nil(t, err)
+	}
+
+	for i := 0; i < N-1; i++ {
+		keyStr := fmt.Sprintf("key%03d", i)
+		next := []byte(fmt.Sprintf("key%03d", i+1))
+		ent, err := tree.MinGt(ctx, s, []byte(keyStr+".000"))
+		require.Nil(t, err)
+		require.Equal(t, ent.Key, next)
+	}
+
+	ent, err := tree.MinGt(ctx, s, []byte("key999"))
+	require.Nil(t, err)
+	assert.Nil(t, ent)
+}

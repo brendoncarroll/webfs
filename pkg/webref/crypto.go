@@ -17,7 +17,7 @@ import (
 	"github.com/brendoncarroll/webfs/pkg/stores"
 )
 
-func PostCrypto(ctx context.Context, s stores.WriteOnce, prefix string, data []byte, o Options) (*CryptoRef, error) {
+func PostCrypto(ctx context.Context, s stores.Post, prefix string, data []byte, o Options) (*CryptoRef, error) {
 	secret := generateSecret(data, o.SecretSeed)
 
 	ctextLen := len(data)
@@ -81,6 +81,10 @@ func crypt(algo EncAlgo, secret, in, out []byte) error {
 		return errors.New("unsupported enc-algo")
 	}
 	return nil
+}
+
+func DeleteCrypto(ctx context.Context, s stores.Delete, r *CryptoRef) error {
+	return s.Delete(ctx, r.Url)
 }
 
 // secrets are generated from a seed and the

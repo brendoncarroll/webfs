@@ -38,7 +38,7 @@ func (r *Router) LookupStore(key string) Read {
 func (r *Router) MaxBlobSize() int {
 	maxSize := 0
 	for _, route := range r.routes {
-		wstore, ok := route.Store.(ReadWriteOnce)
+		wstore, ok := route.Store.(ReadPost)
 		if ok && wstore != nil {
 			ms2 := wstore.MaxBlobSize()
 			if ms2 > maxSize {

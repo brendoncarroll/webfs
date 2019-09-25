@@ -18,12 +18,22 @@ type Check interface {
 	Check(ctx context.Context, k string) (bool, error)
 }
 
-type WriteOnce interface {
+type Post interface {
 	Post(ctx context.Context, prefix string, data []byte) (string, error)
 	MaxBlobSize() int
 }
 
-type ReadWriteOnce interface {
+type Delete interface {
+	Delete(ctx context.Context, key string) error
+}
+
+type ReadPost interface {
 	Read
-	WriteOnce
+	Post
+}
+
+type ReadPostDelete interface {
+	Read
+	Post
+	Delete
 }

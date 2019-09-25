@@ -1,11 +1,10 @@
-package webfs
+package webfsim
 
 import (
 	"context"
 	"testing"
 
 	"github.com/brendoncarroll/webfs/pkg/stores"
-	"github.com/brendoncarroll/webfs/pkg/webfs/models"
 	"github.com/brendoncarroll/webfs/pkg/webref"
 	"github.com/brendoncarroll/webfs/pkg/wrds"
 	"github.com/stretchr/testify/assert"
@@ -18,7 +17,7 @@ func TestFileAppend(t *testing.T) {
 	opts.Replicas[""] = 1
 
 	store := stores.NewMemStore(4096)
-	f := &models.File{Tree: wrds.NewTree()}
+	f := &File{Tree: wrds.NewTree()}
 
 	testData := []string{
 		"1. hello\n",
@@ -32,7 +31,7 @@ func TestFileAppend(t *testing.T) {
 	)
 	for _, s := range testData {
 		d := []byte(s)
-		f, err = fileAppend(ctx, store, *opts, *f, d)
+		f, err = FileAppend(ctx, store, *opts, *f, d)
 		n += len(d)
 		require.Nil(t, err)
 	}

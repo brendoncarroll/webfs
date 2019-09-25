@@ -3,6 +3,7 @@ package wrds
 import (
 	"bytes"
 	"context"
+	"log"
 
 	"github.com/brendoncarroll/webfs/pkg/webref"
 )
@@ -19,8 +20,9 @@ func NewTreeBuilder() *TreeBuilder {
 	}
 }
 
-func (tb *TreeBuilder) Put(ctx context.Context, s ReadWriteOnce, opts webref.Options, ent *TreeEntry) error {
+func (tb *TreeBuilder) Put(ctx context.Context, s ReadPost, opts webref.Options, ent *TreeEntry) error {
 	if bytes.Compare(ent.Key, tb.lastKey) <= 0 {
+		log.Println("new key:", ent.Key, "last key:", tb.lastKey)
 		panic("tree builder: Put called with out of order key")
 	}
 	if tb.isDone {
@@ -65,7 +67,7 @@ func (tb *TreeBuilder) Put(ctx context.Context, s ReadWriteOnce, opts webref.Opt
 	return nil
 }
 
-func (tb *TreeBuilder) Finish(ctx context.Context, store ReadWriteOnce, opts Options) (*Tree, error) {
+func (tb *TreeBuilder) Finish(ctx context.Context, store ReadPost, opts Options) (*Tree, error) {
 	if tb.isDone {
 		panic("Finish called twice")
 	}

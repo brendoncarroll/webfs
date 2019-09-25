@@ -3,10 +3,6 @@ package ipfsstore
 import (
 	"context"
 	"errors"
-	"fmt"
-	"io/ioutil"
-	"log"
-	"net/http"
 	"strings"
 
 	"github.com/brendoncarroll/webfs/pkg/stores"
@@ -26,34 +22,14 @@ const (
 	urlPrefix = "ipfs://"
 )
 
-type IPFSStore = stores.ReadWriteOnce
+type IPFSStore = stores.ReadPost
 
-func New(u string) (IPFSStore, error) {
+func New(u string) IPFSStore {
 	if u == "" {
 		u = DefaultLocalURL
 	}
 	client := ipfsapi.NewShell(u)
-	if client.IsUp() {
-		return &ipfsClient{
-			client: client,
-		}, nil
-	}
-
-	log.Printf("ipfs-node: %s is down\n", u)
-	// no local node try to setup a gateway
-	urls := []string{
-		CloudflareURL,
-		OfficialGatewayURL,
-	}
-	for _, u := range urls {
-		gateway := &ipfsGateway{endpoint: u}
-		if gateway.IsUp() {
-			log.Printf("ipfs-gateway %s is up\n", u)
-			return gateway, nil
-		}
-	}
-
-	return nil, fmt.Errorf("no available ipfs gateway")
+	return &ipfsClient{client: client}
 }
 
 type ipfsClient struct {
@@ -83,40 +59,4 @@ func (s *ipfsClient) Post(ctx context.Context, key string, data []byte) (string,
 
 func (s *ipfsClient) MaxBlobSize() int {
 	return MaxBlobSize
-}
-
-type ipfsGateway struct {
-	endpoint string
-}
-
-func (s *ipfsGateway) IsUp() bool {
-	c := http.DefaultClient
-	res, err := c.Head(s.endpoint)
-	if err != nil {
-		return false
-	}
-	return res.StatusCode == http.StatusOK
-}
-
-func (s *ipfsGateway) Get(ctx context.Context, key string) ([]byte, error) {
-	if !strings.HasPrefix(key, urlPrefix) {
-		return nil, errors.New("Invalid key: " + key)
-	}
-	key = key[len(urlPrefix):]
-
-	p := fmt.Sprintf("%s/ipfs/%s", s.endpoint, key)
-	res, err := http.Get(p)
-	if err != nil {
-		return nil, err
-	}
-	defer res.Body.Close()
-	return ioutil.ReadAll(res.Body)
-}
-
-func (s *ipfsGateway) Post(ctx context.Context, prefix string, data []byte) (string, error) {
-	return "", fmt.Errorf("cannot post to IPFS gateway")
-}
-
-func (s *ipfsGateway) MaxBlobSize() int {
-	return 0
 }

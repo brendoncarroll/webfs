@@ -4,11 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 
-	"github.com/brendoncarroll/webfs/pkg/stores"
-	"github.com/brendoncarroll/webfs/pkg/webfs/models"
+	"github.com/brendoncarroll/webfs/pkg/webfsim"
 	"github.com/brendoncarroll/webfs/pkg/webref"
 )
 
@@ -71,43 +69,15 @@ func (o *baseObject) getOptions() *Options {
 	return o.parent.getOptions()
 }
 
-func objectSplit(ctx context.Context, s stores.ReadWriteOnce, opts webref.Options, o models.Object) (*models.Object, error) {
-	var (
-		o2 *models.Object
-	)
-	switch x := o.Value.(type) {
-	case *models.Object_Dir:
-		d2, err := dirSplit(ctx, s, opts, *x.Dir)
-		if err != nil {
-			return nil, err
-		}
-		o2 = &models.Object{
-			Value: &models.Object_Dir{Dir: d2},
-		}
-	case *models.Object_File:
-		f2, err := fileSplit(ctx, s, opts, *x.File)
-		if err != nil {
-			return nil, err
-		}
-		o2 = &models.Object{
-			Value: &models.Object_File{File: f2},
-		}
-	default:
-		return nil, fmt.Errorf("unsplittable object %v", o)
-	}
-
-	return o2, nil
-}
-
 func unmarshalObject(parent Object, name string, data []byte) (Object, error) {
-	m := models.Object{}
+	m := webfsim.Object{}
 	if err := json.Unmarshal(data, &m); err != nil {
 		return nil, err
 	}
 	return wrapObject(parent, name, &m)
 }
 
-func wrapObject(parent Object, nameInParent string, o *models.Object) (Object, error) {
+func wrapObject(parent Object, nameInParent string, o *webfsim.Object) (Object, error) {
 	base := baseObject{
 		parent:       parent,
 		nameInParent: nameInParent,
@@ -115,7 +85,7 @@ func wrapObject(parent Object, nameInParent string, o *models.Object) (Object, e
 	}
 
 	switch o2 := o.Value.(type) {
-	case *models.Object_Volume:
+	case *webfsim.Object_Volume:
 		wfs := parent.getFS()
 		cell, err := wfs.setupCell(o2.Volume)
 		if err != nil {
@@ -127,13 +97,13 @@ func wrapObject(parent Object, nameInParent string, o *models.Object) (Object, e
 			baseObject: base,
 		}, nil
 
-	case *models.Object_File:
+	case *webfsim.Object_File:
 		return &File{
 			baseObject: base,
 			m:          *o2.File,
 		}, nil
 
-	case *models.Object_Dir:
+	case *webfsim.Object_Dir:
 		return &Dir{
 			m:          *o2.Dir,
 			baseObject: base,

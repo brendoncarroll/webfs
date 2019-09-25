@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/brendoncarroll/webfs/pkg/stores"
+	"github.com/multiformats/go-multihash"
 )
 
 const MaxBlobSize = 1 << 16
@@ -23,9 +24,6 @@ type HttpStore struct {
 }
 
 func New(endpoint string, prefix string) *HttpStore {
-	if len(endpoint) > 0 && endpoint[len(endpoint)-1] != '/' {
-		endpoint += "/"
-	}
 	return &HttpStore{
 		endpoint:    endpoint,
 		maxBlobSize: MaxBlobSize,
@@ -38,8 +36,20 @@ func (hs *HttpStore) Get(ctx context.Context, key string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if key2[0] == '/' {
+		key2 = key2[1:]
+	}
 
-	resp, err := http.Get(hs.endpoint + key2)
+	mhBytes, err := base64.URLEncoding.DecodeString(key2)
+	if err != nil {
+		return nil, err
+	}
+	want, err := multihash.Decode(mhBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := http.Get(hs.getURL(key2))
 	if err != nil {
 		return nil, err
 	}
@@ -58,6 +68,14 @@ func (hs *HttpStore) Get(ctx context.Context, key string) ([]byte, error) {
 	data, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
+	}
+
+	actual, err := multihash.Sum(data, want.Code, want.Length)
+	if err != nil {
+		return nil, err
+	}
+	if bytes.Compare(mhBytes, actual) != 0 {
+		return nil, errors.New("got bad data from store")
 	}
 	return data, nil
 }
@@ -87,18 +105,39 @@ func (hs *HttpStore) Post(ctx context.Context, prefix string, data []byte) (stri
 		}
 	}()
 
-	idBytes, err := ioutil.ReadAll(resp.Body)
+	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
 	}
-
-	idStr := base64.URLEncoding.EncodeToString(idBytes)
-	key := hs.prefix + idStr
+	if resp.StatusCode != http.StatusOK {
+		return "", errors.New(string(body))
+	}
+	key := hs.prefix + "/" + string(body)
 	return key, nil
 }
 
 func (hs *HttpStore) MaxBlobSize() int {
 	return hs.maxBlobSize
+}
+
+func (hs *HttpStore) Delete(ctx context.Context, key string) (err error) {
+	key, err = hs.removePrefix(key)
+	if err != nil {
+		return err
+	}
+	u := hs.getURL(key)
+	req, err := http.NewRequest(http.MethodDelete, u, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("error not OK: %d %s", resp.StatusCode, resp.Status)
+	}
+	return nil
 }
 
 func (hs *HttpStore) removePrefix(x string) (string, error) {
@@ -107,4 +146,13 @@ func (hs *HttpStore) removePrefix(x string) (string, error) {
 	}
 	y := x[len(hs.prefix):]
 	return y, nil
+}
+
+func (hs *HttpStore) getURL(x string) string {
+	y := hs.endpoint
+	if y[len(y)-1] != '/' {
+		y += "/"
+	}
+	y += x
+	return y
 }

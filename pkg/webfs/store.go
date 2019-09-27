@@ -96,6 +96,20 @@ func (s *Store) MaxBlobSize() int {
 	return min(x, parentMbs)
 }
 
+func (s *Store) Check(ctx context.Context, key string) error {
+	store, err := s.getStore(key)
+	if err != nil {
+		return err
+	}
+	checkStore, ok := store.(stores.Check)
+	if !ok {
+		panic("not ok")
+		_, err := store.Get(ctx, key)
+		return err
+	}
+	return checkStore.Check(ctx, key)
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a

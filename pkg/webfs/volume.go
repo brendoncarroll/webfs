@@ -125,6 +125,10 @@ func (v *Volume) get(ctx context.Context) (*webfsim.Commit, error) {
 		return nil, err
 	}
 	v.opts = m.Options
+	if v.opts == nil {
+		v.opts = DefaultOptions()
+	}
+
 	return &m, nil
 }
 
@@ -271,8 +275,6 @@ func (v *Volume) getStore() *Store {
 
 func (v *Volume) getOptions() *Options {
 	switch {
-	case v.parent == nil && v.opts == nil:
-		return DefaultOptions()
 	case v.parent == nil:
 		return v.opts
 	default:
@@ -289,6 +291,12 @@ func (v *Volume) init(ctx context.Context) error {
 		}
 		return &y, nil
 	})
+	if err != nil {
+		return err
+	}
+	if _, err := v.get(ctx); err != nil {
+		return err
+	}
 	return err
 }
 

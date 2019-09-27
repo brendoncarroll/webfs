@@ -113,3 +113,27 @@ func DeleteMirror(ctx context.Context, s stores.Delete, r *Mirror) error {
 	}
 	return nil
 }
+
+func CheckRepPack(ctx context.Context, s stores.Check, r *RepPackRef) ([]RefStatus, error) {
+	switch r2 := r.Ref.(type) {
+	case *RepPackRef_Single:
+		return []RefStatus{CheckCrypto(ctx, s, r2.Single)}, nil
+	case *RepPackRef_Slice:
+		return []RefStatus{CheckCrypto(ctx, s, r2.Slice.Ref)}, nil
+	case *RepPackRef_Mirror:
+		return CheckMirror(ctx, s, r2.Mirror)
+	}
+	return nil, nil
+}
+
+func CheckMirror(ctx context.Context, s stores.Check, r *Mirror) ([]RefStatus, error) {
+	stats := []RefStatus{}
+	for _, x := range r.Replicas {
+		stats2, err := CheckRepPack(ctx, s, x)
+		if err != nil {
+			return nil, err
+		}
+		stats = append(stats, stats2...)
+	}
+	return stats, nil
+}

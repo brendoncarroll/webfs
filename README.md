@@ -76,10 +76,10 @@ Changing store-A to 0 replicas and store-B to 1 replica and running scrub should
 Become a sound way to distribute large datasets which update over time.
 - Create a simple workflow for group archiving.
 - High quality CLI UX
-- Create a more competitive market for file storage and synchronization, by reducing the problem to a implementing a `Store` or `Cell`.
+- Create a more competitive market for file storage and synchronization, by reducing the problem to implementing a `Store` or `Cell`.
 
 Contributions are welcome
 
 ## Non-Goals
-- Create p2p network based `Store` or `Cell`, which runs in the WebFS process.
+- Create a p2p network based `Store` or `Cell`, which runs in the WebFS process.
 Those should run separately and expose an API which this project will be eager to integrate.

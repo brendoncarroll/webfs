@@ -87,6 +87,11 @@ func DeleteCrypto(ctx context.Context, s stores.Delete, r *CryptoRef) error {
 	return s.Delete(ctx, r.Url)
 }
 
+func CheckCrypto(ctx context.Context, s stores.Check, r *CryptoRef) RefStatus {
+	err := s.Check(ctx, r.Url)
+	return RefStatus{URL: r.Url, Error: err}
+}
+
 // secrets are generated from a seed and the
 // data to be encrypted.
 // - an empty seed is totally convergent

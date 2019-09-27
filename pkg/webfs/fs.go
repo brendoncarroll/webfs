@@ -49,7 +49,6 @@ func New(rootCell Cell, baseStore stores.ReadPost) (*WebFS, error) {
 			parent:       nil,
 			nameInParent: "",
 		},
-		opts: nil,
 	}
 	if err := rv.init(context.TODO()); err != nil {
 		return nil, err
@@ -219,11 +218,34 @@ func (wfs *WebFS) WalkObjects(ctx context.Context, f func(o Object) bool) error 
 	return err
 }
 
-func (wfs *WebFS) RefIter(ctx context.Context, f func(ref webref.Ref) bool) error {
-	v := wfs.root
-	var topErr error
+func (wfs *WebFS) ParDo(ctx context.Context, f func(Object) bool) error {
+	ch := make(chan Object, 16)
 
-	_, err := v.Walk(ctx, func(o Object) bool {
+	const N = 16
+	wg := sync.WaitGroup{}
+	wg.Add(N)
+	for i := 0; i < N; i++ {
+		go func() {
+			for o := range ch {
+				f(o)
+			}
+			wg.Done()
+		}()
+	}
+
+	err := wfs.WalkObjects(ctx, func(o Object) bool {
+		ch <- o
+		return true
+	})
+	close(ch)
+
+	wg.Wait()
+	return err
+}
+
+func (wfs *WebFS) RefIter(ctx context.Context, f func(ref webref.Ref) bool) error {
+	var topErr error
+	err := wfs.ParDo(ctx, func(o Object) bool {
 		cont, err := o.RefIter(ctx, f)
 		if err != nil {
 			topErr = err

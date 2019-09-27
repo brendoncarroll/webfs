@@ -40,6 +40,7 @@ type Object interface {
 	getFS() *WebFS
 	getStore() *Store
 	getOptions() *Options
+	getParent() Object
 }
 
 type baseObject struct {
@@ -55,6 +56,10 @@ func (o *baseObject) Path() Path {
 		p = append(p, o.nameInParent)
 	}
 	return p
+}
+
+func (o *baseObject) getParent() Object {
+	return o.parent
 }
 
 func (o *baseObject) getFS() *WebFS {

@@ -12,7 +12,8 @@ message CellSpec {
         HTTPCellSpec http = 1;
 
         // higher order cells
-        CryptoCellSpec crypto = 128;
+        RWACryptoCellSpec rwacrypto = 128;
+        SecretBoxCellSpec secretbox = 129;
     }
 }
 
@@ -21,11 +22,16 @@ message HTTPCellSpec {
     string auth_header = 2;
 }
 
-message CryptoCellSpec {
+message RWACryptoCellSpec {
     CellSpec inner = 1;
 
     ccp.Entity private_entity = 2;
     ccp.Entity public_entity = 3;
 
     ccp.Who who = 4;
+}
+
+message SecretBoxCellSpec {
+    CellSpec inner = 1;
+    bytes secret = 2;
 }

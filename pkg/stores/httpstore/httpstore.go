@@ -80,9 +80,21 @@ func (hs *HttpStore) Get(ctx context.Context, key string) ([]byte, error) {
 	return data, nil
 }
 
-func (hs *HttpStore) Check(ctx context.Context, key string) (bool, error) {
-	// TODO: http HEAD
-	return false, nil
+func (hs *HttpStore) Check(ctx context.Context, key string) (err error) {
+	key, err = hs.removePrefix(key)
+	if err != nil {
+		return err
+	}
+	u := hs.getURL(key)
+	resp, err := http.DefaultClient.Head(u)
+	if err != nil {
+		return err
+	}
+	ok := resp.StatusCode == http.StatusOK
+	if !ok {
+		return errors.New("status: " + resp.Status)
+	}
+	return nil
 }
 
 func (hs *HttpStore) Post(ctx context.Context, prefix string, data []byte) (string, error) {

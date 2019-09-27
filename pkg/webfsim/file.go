@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"log"
 
 	"github.com/brendoncarroll/webfs/pkg/stores"
 	webref "github.com/brendoncarroll/webfs/pkg/webref"
@@ -101,7 +100,6 @@ func FileReadAt(ctx context.Context, s stores.Read, x File, off uint64, p []byte
 		if err != nil {
 			return n, err
 		}
-		log.Println("offset", off, "endoffset", endOffset)
 
 		dist2end := endOffset - off
 		if dist2end > uint64(len(data)) {
@@ -124,9 +122,7 @@ func FileReadAt(ctx context.Context, s stores.Read, x File, off uint64, p []byte
 }
 
 func FileWriteAt(ctx context.Context, s stores.ReadPost, x File) (*File, error) {
-	y := x
-
-	return &y, nil
+	return nil, errors.New("FileWriteAt not implemented")
 }
 
 func FileSplit(ctx context.Context, store stores.ReadPost, opts webref.Options, x File) (*File, error) {

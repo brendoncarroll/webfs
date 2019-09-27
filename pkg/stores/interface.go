@@ -15,7 +15,7 @@ type Read interface {
 }
 
 type Check interface {
-	Check(ctx context.Context, k string) (bool, error)
+	Check(ctx context.Context, k string) error
 }
 
 type Post interface {

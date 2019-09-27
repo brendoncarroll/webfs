@@ -28,3 +28,16 @@ func Delete(ctx context.Context, s stores.Delete, ref Ref) error {
 func GetURLs(ref *Ref) []string {
 	return ref.Ref.GetURLs()
 }
+
+type RefStatus struct {
+	URL   string
+	Error error
+}
+
+func (rs RefStatus) IsAlive() bool {
+	return rs.Error == nil
+}
+
+func Check(ctx context.Context, s stores.Check, ref Ref) ([]RefStatus, error) {
+	return CheckRepPack(ctx, s, ref.Ref)
+}

@@ -3,7 +3,6 @@ package webfs
 import (
 	"os"
 
-	"github.com/brendoncarroll/webfs/pkg/cells"
 	"github.com/brendoncarroll/webfs/pkg/cells/filecell"
 )
 
@@ -19,6 +18,5 @@ func NewSuperblock(p string) (Cell, error) {
 }
 
 func SuperblockFromPath(p string) Cell {
-	c := cells.Make(filecell.Spec{Path: p})
-	return c
+	return filecell.New(p)
 }

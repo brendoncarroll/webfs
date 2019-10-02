@@ -6,15 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
-
-	"github.com/brendoncarroll/webfs/pkg/cells"
 )
-
-func init() {
-	cells.Register(Spec{}, func(x interface{}) cells.Cell {
-		return New()
-	})
-}
 
 var count = int64(0)
 

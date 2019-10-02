@@ -10,7 +10,6 @@ import (
 
 	"golang.org/x/crypto/sha3"
 
-	"github.com/brendoncarroll/webfs/pkg/cells"
 	"github.com/brendoncarroll/webfs/pkg/cells/httpcell"
 	"github.com/brendoncarroll/webfs/pkg/cells/memcell"
 	"github.com/brendoncarroll/webfs/pkg/stores"
@@ -23,7 +22,7 @@ var ctx = context.TODO()
 
 func getTestFS() *WebFS {
 	ms := stores.NewMemStore(4096)
-	mc := cells.Make(memcell.Spec{})
+	mc := memcell.New()
 	wfs, err := New(mc, ms)
 	if err != nil {
 		panic(err)

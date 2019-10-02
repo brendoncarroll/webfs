@@ -9,15 +9,8 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/brendoncarroll/webfs/pkg/cells"
 	"golang.org/x/crypto/sha3"
 )
-
-func init() {
-	cells.Register(Spec{}, func(x interface{}) cells.Cell {
-		return New(x.(Spec))
-	})
-}
 
 const (
 	currentHeader = "X-Current"

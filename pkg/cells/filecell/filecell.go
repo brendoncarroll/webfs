@@ -6,15 +6,7 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"sync"
-
-	"github.com/brendoncarroll/webfs/pkg/cells"
 )
-
-func init() {
-	cells.Register(Spec{}, func(x interface{}) cells.Cell {
-		return New(x.(Spec).Path)
-	})
-}
 
 type Spec struct {
 	Path string

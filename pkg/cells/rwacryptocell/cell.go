@@ -7,7 +7,7 @@ import (
 	fmt "fmt"
 	"io/ioutil"
 	"net/http"
-	"sync"
+	"sync/atomic"
 
 	"github.com/golang/protobuf/proto"
 
@@ -27,13 +27,16 @@ type Spec struct {
 	PublicEntity  *Entity
 }
 
+type payloadMapping struct {
+	payload  []byte
+	contents *CellContents
+}
+
 type Cell struct {
 	innerCell cells.Cell
 	spec      Spec
 
-	mu             sync.Mutex
-	latestContents *CellContents
-	latestPayload  []byte
+	latestPayload atomic.Value
 }
 
 func New(spec Spec) *Cell {
@@ -65,8 +68,11 @@ func (c *Cell) get(ctx context.Context) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	c.latestContents = contents
-	c.latestPayload = payload
+
+	c.latestPayload.Store(&payloadMapping{
+		contents: contents,
+		payload:  payload,
+	})
 	return payload, err
 }
 
@@ -83,12 +89,13 @@ func (c *Cell) getContents(ctx context.Context) (*CellContents, error) {
 }
 
 func (c *Cell) CAS(ctx context.Context, cur, next []byte) (bool, error) {
+	pm := c.latestPayload.Load().(*payloadMapping)
 	// if it's not what the cell believes to be the latest don't even try.
-	if bytes.Compare(c.latestPayload, cur) != 0 {
+	if bytes.Compare(pm.payload, cur) != 0 {
 		return false, nil
 	}
 	// if it is, then use the latest contents as the current
-	curContents := c.latestContents
+	curContents := pm.contents
 
 	// create next contents with the next payload
 	nextContents, err := PutPayload(curContents, c.getPrivate(), next)
@@ -96,7 +103,19 @@ func (c *Cell) CAS(ctx context.Context, cur, next []byte) (bool, error) {
 		return false, err
 	}
 
-	return c.cas(ctx, curContents, nextContents)
+	success, err := c.cas(ctx, curContents, nextContents)
+	if err != nil {
+		return false, err
+	}
+
+	if success {
+		c.latestPayload.Store(&payloadMapping{
+			contents: nextContents,
+			payload:  next,
+		})
+	}
+
+	return success, nil
 }
 
 func (c *Cell) cas(ctx context.Context, curContents, nextContents *CellContents) (bool, error) {
@@ -113,9 +132,6 @@ func (c *Cell) cas(ctx context.Context, curContents, nextContents *CellContents)
 	if err != nil {
 		return false, err
 	}
-	if success {
-		c.updateLatest(nextContents, nextBytes)
-	}
 	return success, nil
 }
 
@@ -129,13 +145,6 @@ func (c *Cell) URL() string {
 
 func (c *Cell) getPrivate() *Entity {
 	return c.spec.PrivateEntity
-}
-
-func (c *Cell) updateLatest(contents *CellContents, payload []byte) {
-	c.mu.Lock()
-	c.latestContents = contents
-	c.latestPayload = payload
-	c.mu.Unlock()
 }
 
 func (c *Cell) init(ctx context.Context, retries int) error {
@@ -180,6 +189,11 @@ func (c *Cell) init(ctx context.Context, retries int) error {
 	if !success {
 		return c.init(ctx, retries-1)
 	}
+
+	c.latestPayload.Store(&payloadMapping{
+		contents: next,
+		payload:  nil,
+	})
 	return nil
 }
 

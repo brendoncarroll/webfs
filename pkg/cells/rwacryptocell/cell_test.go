@@ -4,10 +4,39 @@ import (
 	"context"
 	"testing"
 
+	"github.com/brendoncarroll/webfs/pkg/cells"
 	"github.com/brendoncarroll/webfs/pkg/cells/memcell"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestCell(t *testing.T) {
+	cells.CellTestSuite(t, func() cells.Cell {
+		ctx := context.TODO()
+		privEnt, err := GenerateEntity()
+		if err != nil {
+			panic(err)
+		}
+		pubEnt := GetPublicEntity(privEnt)
+		spec := Spec{
+			Inner: memcell.New(),
+			Who: &Who{
+				Entities: []*Entity{pubEnt},
+				Admin:    []int32{0},
+				Write:    []int32{0},
+				Read:     []int32{0},
+			},
+			PrivateEntity: privEnt,
+			PublicEntity:  pubEnt,
+		}
+		c := New(spec)
+		err = c.init(ctx, 0)
+		if err != nil {
+			panic(err)
+		}
+		return c
+	})
+}
 
 func TestCAS(t *testing.T) {
 	ctx := context.TODO()

@@ -24,7 +24,7 @@ type Cell struct {
 	spec  Spec
 	inner cells.Cell
 
-	lastPayload atomic.Value // []byte
+	lastPayload atomic.Value
 }
 
 func New(spec Spec) *Cell {

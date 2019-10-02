@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -15,20 +16,34 @@ import (
 	"github.com/multiformats/go-multihash"
 )
 
-const MaxBlobSize = 1 << 16
-
 type HttpStore struct {
 	endpoint    string
 	prefix      string
 	maxBlobSize int
+	headers     map[string]string
+	hc          *http.Client
 }
 
-func New(endpoint string, prefix string) *HttpStore {
+func New(endpoint string, prefix string, headers map[string]string) (*HttpStore, error) {
+	mbsUrl := endpoint + "/.maxBlobSize"
+	resp, err := http.Get(mbsUrl)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var maxBlobSize int
+	if _, err := fmt.Fscanf(resp.Body, "%d", &maxBlobSize); err != nil {
+		return nil, err
+	}
+
 	return &HttpStore{
 		endpoint:    endpoint,
-		maxBlobSize: MaxBlobSize,
+		maxBlobSize: maxBlobSize,
 		prefix:      prefix,
-	}
+		hc:          http.DefaultClient,
+		headers:     headers,
+	}, nil
 }
 
 func (hs *HttpStore) Get(ctx context.Context, key string) ([]byte, error) {
@@ -49,7 +64,9 @@ func (hs *HttpStore) Get(ctx context.Context, key string) ([]byte, error) {
 		return nil, err
 	}
 
-	resp, err := http.Get(hs.getURL(key2))
+	req := hs.newRequest(ctx, http.MethodGet, hs.getURL(key2), nil)
+
+	resp, err := hs.hc.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +103,8 @@ func (hs *HttpStore) Check(ctx context.Context, key string) (err error) {
 		return err
 	}
 	u := hs.getURL(key)
-	resp, err := http.DefaultClient.Head(u)
+	req := hs.newRequest(ctx, http.MethodHead, u, nil)
+	resp, err := hs.hc.Do(req)
 	if err != nil {
 		return err
 	}
@@ -107,7 +125,8 @@ func (hs *HttpStore) Post(ctx context.Context, prefix string, data []byte) (stri
 	}
 
 	buf := bytes.NewBuffer(data)
-	resp, err := http.Post(hs.endpoint, `application/data`, buf)
+	req := hs.newRequest(ctx, http.MethodPost, hs.endpoint, buf)
+	resp, err := hs.hc.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -122,7 +141,7 @@ func (hs *HttpStore) Post(ctx context.Context, prefix string, data []byte) (stri
 		return "", err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", errors.New(string(body))
+		return "", fmt.Errorf("endpoint=%s status=%d body=%s", hs.endpoint, resp.StatusCode, string(body))
 	}
 	key := hs.prefix + "/" + string(body)
 	return key, nil
@@ -138,10 +157,9 @@ func (hs *HttpStore) Delete(ctx context.Context, key string) (err error) {
 		return err
 	}
 	u := hs.getURL(key)
-	req, err := http.NewRequest(http.MethodDelete, u, nil)
-	if err != nil {
-		return err
-	}
+
+	req := hs.newRequest(ctx, http.MethodDelete, u, nil)
+
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
@@ -167,4 +185,16 @@ func (hs *HttpStore) getURL(x string) string {
 	}
 	y += x
 	return y
+}
+
+func (hs *HttpStore) newRequest(ctx context.Context, method, u string, body io.Reader) *http.Request {
+	r, err := http.NewRequest(method, u, body)
+	if err != nil {
+		panic(err)
+	}
+	r = r.WithContext(ctx)
+	for k, v := range hs.headers {
+		r.Header.Set(k, v)
+	}
+	return r
 }

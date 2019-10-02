@@ -13,7 +13,8 @@ func init() {
 }
 
 var catCmd = &cobra.Command{
-	Use: "cat",
+	Use:   "cat",
+	Short: "Write the contents of a file to stdout",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := setupWfs(); err != nil {
 			return err

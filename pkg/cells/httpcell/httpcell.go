@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -19,13 +20,12 @@ func init() {
 }
 
 const (
-	authHeader    = "Authorization"
 	currentHeader = "X-Current"
 )
 
 type Spec struct {
-	URL        string
-	AuthHeader string
+	URL     string
+	Headers map[string]string
 }
 
 type Cell struct {
@@ -45,11 +45,8 @@ func (c *Cell) URL() string {
 }
 
 func (c *Cell) Get(ctx context.Context) ([]byte, error) {
-	req, err := http.NewRequest(http.MethodGet, c.spec.URL, nil)
-	if err != nil {
-		panic(err)
-	}
-	req.Header.Add(authHeader, c.spec.AuthHeader)
+	req := c.newRequest(ctx, http.MethodGet, c.spec.URL, nil)
+
 	resp, err := c.hc.Do(req)
 	if err != nil {
 		return nil, err
@@ -69,12 +66,10 @@ func (c *Cell) Get(ctx context.Context) ([]byte, error) {
 func (c *Cell) CAS(ctx context.Context, cur, next []byte) (bool, error) {
 	curHash := sha3.Sum256(cur)
 	curHashb64 := base64.URLEncoding.EncodeToString(curHash[:])
-	req, err := http.NewRequest(http.MethodPut, c.spec.URL, bytes.NewBuffer(next))
-	if err != nil {
-		return false, err
-	}
-	req.Header.Add(authHeader, c.spec.AuthHeader)
-	req.Header.Add(currentHeader, curHashb64)
+
+	req := c.newRequest(ctx, http.MethodPut, c.spec.URL, bytes.NewBuffer(next))
+	req.Header.Set(currentHeader, curHashb64)
+
 	resp, err := c.hc.Do(req)
 	if err != nil {
 		return false, err
@@ -90,4 +85,17 @@ func (c *Cell) CAS(ctx context.Context, cur, next []byte) (bool, error) {
 	}
 	success := bytes.Compare(next, data) == 0
 	return success, nil
+}
+
+func (c *Cell) newRequest(ctx context.Context, method, u string, body io.Reader) *http.Request {
+	req, err := http.NewRequest(method, u, body)
+	if err != nil {
+		panic(err)
+	}
+	req = req.WithContext(ctx)
+
+	for k, v := range c.spec.Headers {
+		req.Header.Set(k, v)
+	}
+	return req
 }

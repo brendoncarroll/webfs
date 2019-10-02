@@ -15,7 +15,8 @@ func init() {
 }
 
 var newCmd = &cobra.Command{
-	Use: "new",
+	Use:   "new",
+	Short: "Create a new instance of any WebFS object",
 }
 
 var newFS = &cobra.Command{

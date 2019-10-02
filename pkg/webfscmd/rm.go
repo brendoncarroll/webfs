@@ -11,7 +11,7 @@ func init() {
 }
 
 var rmCmd = &cobra.Command{
-	Short: "remove",
+	Short: "Remove an item from a directory",
 	Use:   "rm",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := setupWfs(); err != nil {

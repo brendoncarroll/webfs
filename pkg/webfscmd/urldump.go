@@ -13,7 +13,8 @@ func init() {
 }
 
 var urldumpCmd = &cobra.Command{
-	Use: "urldump",
+	Use:   "urldump",
+	Short: "Write all the URLs in the filesystem to stdout",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := setupWfs(); err != nil {
 			return err

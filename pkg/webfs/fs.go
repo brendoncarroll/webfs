@@ -267,8 +267,8 @@ func (wfs *WebFS) NewVolume(ctx context.Context, p string, spec webfsim.VolumeSp
 	switch x := spec.CellSpec.Spec.(type) {
 	case *webfsim.CellSpec_Http:
 		spec2 := httpcell.Spec{
-			URL:        x.Http.Url,
-			AuthHeader: x.Http.AuthHeader,
+			URL:     x.Http.Url,
+			Headers: x.Http.Headers,
 		}
 		cell = httpcell.New(spec2)
 	}
@@ -337,14 +337,15 @@ func (wfs *WebFS) GetVolume(ctx context.Context, id string) (*Volume, error) {
 
 func (wfs *WebFS) ListVolumes(ctx context.Context) ([]*Volume, error) {
 	vols := []*Volume{}
-	err := wfs.WalkObjects(ctx, func(o Object) bool {
+	err := wfs.ParDo(ctx, func(o Object) bool {
 		vol, ok := o.(*Volume)
 		if ok {
 			vols = append(vols, vol)
 		}
 		return true
 	})
-	return vols, err
+	log.Println(err)
+	return vols, nil
 }
 
 func (wfs *WebFS) addCell(cell Cell) {

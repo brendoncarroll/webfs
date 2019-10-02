@@ -10,7 +10,8 @@ func init() {
 }
 
 var webuiCmd = &cobra.Command{
-	Use: "webui",
+	Use:   "webui",
+	Short: "Start a simple, read-only HTTP user interface",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := setupWfs(); err != nil {
 			return err

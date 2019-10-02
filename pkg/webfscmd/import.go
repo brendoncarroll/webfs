@@ -17,7 +17,8 @@ func init() {
 }
 
 var importCmd = &cobra.Command{
-	Use: "import",
+	Use:   "import",
+	Short: "Import a file or directory into WebFS",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := setupWfs(); err != nil {
 			return err

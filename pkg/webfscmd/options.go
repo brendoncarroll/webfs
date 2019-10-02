@@ -12,16 +12,17 @@ import (
 )
 
 func init() {
-	rootCmd.AddCommand(setOptsCmd)
-	setOptsCmd.Flags().StringP("file", "f", "", "-f")
-	setOptsCmd.Flags().StringP("vol", "", "", `--vol=ABCDEF_VOL_ID`)
+	rootCmd.AddCommand(applyOptsCmd)
+	applyOptsCmd.Flags().StringP("file", "f", "", "-f")
+	applyOptsCmd.Flags().StringP("vol", "", "", `--vol=ABCDEF_VOL_ID`)
 
 	getOptsCmd.Flags().StringP("vol", "", "", `--vol=ABCDEF_VOL_ID`)
 	rootCmd.AddCommand(getOptsCmd)
 }
 
-var setOptsCmd = &cobra.Command{
-	Use: "set-options",
+var applyOptsCmd = &cobra.Command{
+	Use:   "apply-options",
+	Short: "Apply options, as specified in a file, to a volume",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := setupWfs(); err != nil {
 			return err
@@ -52,7 +53,8 @@ var setOptsCmd = &cobra.Command{
 }
 
 var getOptsCmd = &cobra.Command{
-	Use: "get-options",
+	Use:   "get-options",
+	Short: "Write the options for a volume to stdout",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := setupWfs(); err != nil {
 			return err

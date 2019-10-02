@@ -11,7 +11,8 @@ func init() {
 }
 
 var mkdirCmd = &cobra.Command{
-	Use: "mkdir",
+	Use:   "mkdir",
+	Short: "Makes a new directory",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := setupWfs(); err != nil {
 			return err

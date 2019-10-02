@@ -45,8 +45,8 @@ func cellSpec2Model(x interface{}) (*webfsim.CellSpec, error) {
 		cellSpec = &webfsim.CellSpec{
 			Spec: &webfsim.CellSpec_Http{
 				Http: &webfsim.HTTPCellSpec{
-					Url:        x2.URL,
-					AuthHeader: x2.AuthHeader,
+					Url:     x2.URL,
+					Headers: x2.Headers,
 				},
 			},
 		}
@@ -63,8 +63,8 @@ func model2Cell(x *webfsim.CellSpec) (cells.Cell, error) {
 	switch x2 := x.Spec.(type) {
 	case *webfsim.CellSpec_Http:
 		spec := httpcell.Spec{
-			URL:        x2.Http.Url,
-			AuthHeader: x2.Http.AuthHeader,
+			URL:     x2.Http.Url,
+			Headers: x2.Http.Headers,
 		}
 		cell = httpcell.New(spec)
 

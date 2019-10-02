@@ -12,7 +12,8 @@ func init() {
 }
 
 var checkCmd = &cobra.Command{
-	Use: "check",
+	Use:   "check",
+	Short: "Check all refs in the filesystem",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := setupWfs(); err != nil {
 			return err

@@ -21,13 +21,17 @@ func newStore(parent *Store, specs []*webfsim.StoreSpec) (*Store, error) {
 	routes := make([]stores.StoreRoute, len(specs))
 	for i, spec := range specs {
 		var s stores.ReadPost
+		var err error
 		switch x := spec.Spec.(type) {
 		case *webfsim.StoreSpec_Http:
-			s = httpstore.New(x.Http.Endpoint, x.Http.Prefix)
+			s, err = httpstore.New(x.Http.Endpoint, x.Http.Prefix, x.Http.Headers)
 		case *webfsim.StoreSpec_Ipfs:
 			s = ipfsstore.New(x.Ipfs.Endpoint)
 		default:
 			return nil, fmt.Errorf("bad spec %v", spec)
+		}
+		if err != nil {
+			return nil, err
 		}
 
 		routes[i] = stores.StoreRoute{

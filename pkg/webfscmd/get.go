@@ -15,8 +15,9 @@ func init() {
 }
 
 var getCmd = &cobra.Command{
-	Use:  "get",
-	Args: cobra.MinimumNArgs(1),
+	Use:   "get",
+	Short: "Get all, some or one of any object in WebFS",
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := setupWfs(); err != nil {
 			return err

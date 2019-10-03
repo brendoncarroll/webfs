@@ -363,8 +363,8 @@ func (wfs *WebFS) getCellByURL(id string) Cell {
 	return cell.(Cell)
 }
 
-func (wfs *WebFS) setupCell(spec *webfsim.VolumeSpec) (Cell, error) {
-	newCell, err := model2Cell(spec.CellSpec)
+func (wfs *WebFS) setupCell(spec *webfsim.VolumeSpec, as *auxState) (Cell, error) {
+	newCell, err := model2Cell(spec.CellSpec, as)
 	if err != nil {
 		return nil, err
 	}

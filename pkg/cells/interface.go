@@ -8,6 +8,7 @@ type Cell interface {
 	CAS(ctx context.Context, cur, next []byte) (bool, error)
 }
 
-type GetSpec interface {
-	GetSpec() interface{}
+type StatefulCell interface {
+	Cell
+	AuxState() string
 }

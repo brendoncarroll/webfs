@@ -5,7 +5,6 @@ package webfs;
 option go_package = "webfsim";
 
 import "crypto.proto";
-import "ccp.proto";
 
 message CellSpec {
     oneof spec {
@@ -27,8 +26,6 @@ message RWACryptoCellSpec {
 
     ccp.Entity private_entity = 2;
     ccp.Entity public_entity = 3;
-
-    ccp.Who who = 4;
 }
 
 message SecretBoxCellSpec {

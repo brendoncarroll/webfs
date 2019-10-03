@@ -22,7 +22,6 @@ func cellSpec2Model(x interface{}) (*webfsim.CellSpec, error) {
 			Spec: &webfsim.CellSpec_Rwacrypto{
 				Rwacrypto: &webfsim.RWACryptoCellSpec{
 					Inner:         innerSpec,
-					Who:           x2.Who,
 					PublicEntity:  x2.PublicEntity,
 					PrivateEntity: x2.PrivateEntity,
 				},
@@ -57,7 +56,7 @@ func cellSpec2Model(x interface{}) (*webfsim.CellSpec, error) {
 	return cellSpec, nil
 }
 
-func model2Cell(x *webfsim.CellSpec) (cells.Cell, error) {
+func model2Cell(x *webfsim.CellSpec, as *auxState) (cells.Cell, error) {
 	var cell cells.Cell
 
 	switch x2 := x.Spec.(type) {
@@ -69,21 +68,19 @@ func model2Cell(x *webfsim.CellSpec) (cells.Cell, error) {
 		cell = httpcell.New(spec)
 
 	case *webfsim.CellSpec_Rwacrypto:
-		innerCell, err := model2Cell(x2.Rwacrypto.Inner)
+		innerCell, err := model2Cell(x2.Rwacrypto.Inner, as)
 		if err != nil {
 			return nil, err
 		}
 		spec := rwacryptocell.Spec{
-			Inner: innerCell,
-
-			Who:           x2.Rwacrypto.Who,
+			Inner:         innerCell,
 			PrivateEntity: x2.Rwacrypto.PrivateEntity,
 			PublicEntity:  x2.Rwacrypto.PublicEntity,
 		}
-		cell = rwacryptocell.New(spec)
+		cell = rwacryptocell.New(spec, as)
 
 	case *webfsim.CellSpec_Secretbox:
-		innerCell, err := model2Cell(x2.Secretbox.Inner)
+		innerCell, err := model2Cell(x2.Secretbox.Inner, as)
 		if err != nil {
 			return nil, err
 		}
@@ -91,6 +88,7 @@ func model2Cell(x *webfsim.CellSpec) (cells.Cell, error) {
 			Inner: innerCell,
 		}
 		cell = secretboxcell.New(spec)
+
 	default:
 		return nil, fmt.Errorf("unrecognized cell spec. type=%T", x)
 	}

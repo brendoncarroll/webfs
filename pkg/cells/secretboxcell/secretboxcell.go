@@ -37,11 +37,11 @@ func New(spec Spec) *Cell {
 }
 
 func (c *Cell) Get(ctx context.Context) ([]byte, error) {
-	payload, err := c.inner.Get(ctx)
+	ctext, err := c.inner.Get(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if len(payload) < 1 {
+	if len(ctext) < 1 {
 		return nil, nil
 	}
 
@@ -50,11 +50,11 @@ func (c *Cell) Get(ctx context.Context) ([]byte, error) {
 		key   = [32]byte{}
 	)
 
-	if len(payload) < len(nonce) {
-		return nil, errors.New("payload too short")
+	if len(ctext) < len(nonce) {
+		return nil, errors.New("ciphertext too short")
 	}
-	copy(nonce[:], payload[:])
-	box := payload[len(nonce):]
+	copy(nonce[:], ctext[:])
+	box := ctext[len(nonce):]
 
 	copy(key[:], c.spec.Secret[:])
 	ptext, valid := secretbox.Open(nil, box, &nonce, &key)
@@ -62,7 +62,10 @@ func (c *Cell) Get(ctx context.Context) ([]byte, error) {
 		return nil, errors.New("invalid ciphertext")
 	}
 
-	c.lastPayload.Store(payload)
+	c.lastPayload.Store(&payloadMapping{
+		ctext: ctext,
+		ptext: ptext,
+	})
 
 	return ptext, nil
 }

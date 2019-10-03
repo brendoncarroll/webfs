@@ -19,18 +19,13 @@ func TestCell(t *testing.T) {
 		}
 		pubEnt := GetPublicEntity(privEnt)
 		spec := Spec{
-			Inner: memcell.New(),
-			Who: &Who{
-				Entities: []*Entity{pubEnt},
-				Admin:    []int32{0},
-				Write:    []int32{0},
-				Read:     []int32{0},
-			},
+			Inner:         memcell.New(),
 			PrivateEntity: privEnt,
 			PublicEntity:  pubEnt,
 		}
-		c := New(spec)
-		err = c.init(ctx, 0)
+		auxState := memcell.New()
+		c := New(spec, auxState)
+		err = c.Init(ctx)
 		if err != nil {
 			panic(err)
 		}
@@ -40,25 +35,19 @@ func TestCell(t *testing.T) {
 
 func TestCAS(t *testing.T) {
 	ctx := context.TODO()
-	mc := memcell.New()
 	privEnt, err := GenerateEntity()
 	require.Nil(t, err)
 	pubEnt := GetPublicEntity(privEnt)
-
+	mc := memcell.New()
 	spec := Spec{
-		Inner: mc,
-		Who: &Who{
-			Entities: []*Entity{pubEnt},
-			Admin:    []int32{0},
-			Write:    []int32{0},
-			Read:     []int32{0},
-		},
+		Inner:         mc,
 		PrivateEntity: privEnt,
 		PublicEntity:  pubEnt,
 	}
 
-	c := New(spec)
-	err = c.init(ctx, 0)
+	auxState := memcell.New()
+	c := New(spec, auxState)
+	err = c.Init(ctx)
 	require.Nil(t, err)
 
 	data, err := c.Get(ctx)
@@ -73,4 +62,37 @@ func TestCAS(t *testing.T) {
 	data, err = c.Get(ctx)
 	require.Nil(t, err)
 	assert.Equal(t, []byte("test data"), data)
+}
+
+func TestAddPeer(t *testing.T) {
+	ctx := context.TODO()
+	privEnt, err := GenerateEntity()
+	require.Nil(t, err)
+	pubEnt := GetPublicEntity(privEnt)
+	mc := memcell.New()
+	spec := Spec{
+		Inner:         mc,
+		PrivateEntity: privEnt,
+		PublicEntity:  pubEnt,
+	}
+
+	auxState := memcell.New()
+	c := New(spec, auxState)
+	err = c.Init(ctx)
+	require.Nil(t, err)
+
+	peerPriv, err := GenerateEntity()
+	require.Nil(t, err)
+	peerPub := GetPublicEntity(peerPriv)
+
+	err = c.AddEntity(ctx, peerPub)
+	require.Nil(t, err)
+	err = c.GrantRead(ctx, peerPub)
+	require.Nil(t, err)
+}
+
+type Side struct {
+	Private, Public *Entity
+	C               *Cell
+	AuxState        *memcell.Cell
 }

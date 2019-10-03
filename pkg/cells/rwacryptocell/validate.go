@@ -6,13 +6,16 @@ import (
 	"sort"
 )
 
-func ValidateContents(spec Spec, contents *CellContents) []error {
+func ValidateContents(who *Who, next *CellContents) []error {
 	var errs []error
 
-	errs2 := ValidateWho(spec, contents.Who, contents.WhoSigs)
+	if who == nil {
+		return nil
+	}
+	errs2 := ValidateWho(who, next.Who, next.WhoSigs)
 	errs = append(errs, errs2...)
 
-	errs2 = ValidateWhat(contents.Who, contents.What, contents.WhatAuthor, contents.WhatSig)
+	errs2 = ValidateWhat(next.Who, next.What, next.WhatAuthor, next.WhatSig)
 	errs = append(errs, errs2...)
 
 	return errs
@@ -43,20 +46,20 @@ func ValidateWhat(who *Who, what *What, signerIndex int32, sig *Sig) []error {
 	return nil
 }
 
-func ValidateWho(spec Spec, who *Who, sigs map[int32]*Sig) []error {
+func ValidateWho(prev, next *Who, sigs map[int32]*Sig) []error {
 	var errs []error
-	if who == nil {
+	if next == nil {
 		err := errors.New("nil who")
 		errs = append(errs, err)
 		return errs
 	}
 
-	admins := spec.Who.Admin
+	admins := prev.Admin
 	sort.Slice(admins, func(i, j int) bool {
 		return admins[i] < admins[j]
 	})
 
-	whoBytes, err := who.XXX_Marshal(nil, true)
+	whoBytes, err := next.XXX_Marshal(nil, true)
 	if err != nil {
 		panic(err)
 	}
@@ -64,7 +67,7 @@ func ValidateWho(spec Spec, who *Who, sigs map[int32]*Sig) []error {
 	// must find an admin who signed off on it
 	for i, sig := range sigs {
 		if int32Contains(admins, i) {
-			signer := spec.Who.Entities[i].SigningKey
+			signer := prev.Entities[i].SigningKey
 			if err := VerifySig(whoBytes, signer, sig); err != nil {
 				errs = append(errs, err)
 			}

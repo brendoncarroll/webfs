@@ -5,6 +5,8 @@ import (
 	fmt "fmt"
 	"log"
 	"sort"
+
+	"github.com/golang/protobuf/proto"
 )
 
 func GetPayload(c *CellContents, privEnt *Entity) ([]byte, error) {
@@ -48,8 +50,8 @@ func PutPayload(prev *CellContents, privEntity *Entity, data []byte) (*CellConte
 }
 
 func AddReader(prev *CellContents, privEnt, readEnt *Entity) (*CellContents, error) {
-	contents := *prev
-	err := updateWho(&contents, privEnt, func(x *Who) (*Who, error) {
+	contents := proto.Clone(prev).(*CellContents)
+	err := updateWho(contents, privEnt, func(x *Who) (*Who, error) {
 		i := findEntity(x.Entities, readEnt)
 		if i < 0 {
 			return nil, fmt.Errorf("entity not found")
@@ -57,12 +59,12 @@ func AddReader(prev *CellContents, privEnt, readEnt *Entity) (*CellContents, err
 		x.Read = append(x.Read, int32(i))
 		return x, nil
 	})
-	return &contents, err
+	return contents, err
 }
 
 func AddWriter(prev *CellContents, privEnt, writeEnt *Entity) (*CellContents, error) {
-	contents := *prev
-	err := updateWho(&contents, privEnt, func(x *Who) (*Who, error) {
+	contents := proto.Clone(prev).(*CellContents)
+	err := updateWho(contents, privEnt, func(x *Who) (*Who, error) {
 		i := findEntity(x.Entities, writeEnt)
 		if i < 0 {
 			return nil, fmt.Errorf("entity not found")
@@ -70,12 +72,12 @@ func AddWriter(prev *CellContents, privEnt, writeEnt *Entity) (*CellContents, er
 		x.Write = append(x.Write, int32(i))
 		return x, nil
 	})
-	return &contents, err
+	return contents, err
 }
 
 func AddAdmin(prev *CellContents, privEnt, adminEnt *Entity) (*CellContents, error) {
-	contents := *prev
-	err := updateWho(&contents, privEnt, func(x *Who) (*Who, error) {
+	contents := proto.Clone(prev).(*CellContents)
+	err := updateWho(contents, privEnt, func(x *Who) (*Who, error) {
 		adminI := findEntity(x.Entities, adminEnt)
 		if adminI < 0 {
 			return nil, fmt.Errorf("entity not found")
@@ -83,12 +85,12 @@ func AddAdmin(prev *CellContents, privEnt, adminEnt *Entity) (*CellContents, err
 		x.Admin = append(x.Admin, int32(adminI))
 		return x, nil
 	})
-	return &contents, err
+	return contents, err
 }
 
 func AddEntity(prev *CellContents, privEnt, newEnt *Entity) (*CellContents, error) {
-	contents := *prev
-	err := updateWho(&contents, privEnt, func(x *Who) (*Who, error) {
+	contents := proto.Clone(prev).(*CellContents)
+	err := updateWho(contents, privEnt, func(x *Who) (*Who, error) {
 		i := findEntity(x.Entities, newEnt)
 		if i != -1 {
 			return nil, errors.New("entity already exists")
@@ -96,7 +98,7 @@ func AddEntity(prev *CellContents, privEnt, newEnt *Entity) (*CellContents, erro
 		x.Entities = append(x.Entities, newEnt)
 		return x, nil
 	})
-	return &contents, err
+	return contents, err
 }
 
 func updateWho(cc *CellContents, privEnt *Entity, fn func(*Who) (*Who, error)) error {

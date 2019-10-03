@@ -17,22 +17,19 @@ func TestInit(t *testing.T) {
 	cc, err = AddAdmin(cc, privEnt, GetPublicEntity(privEnt))
 	require.Nil(t, err)
 
-	config := Spec{
-		Who: &Who{
-			Entities: []*Entity{GetPublicEntity(privEnt)},
-			Admin:    []int32{0},
-			Write:    nil,
-			Read:     nil,
-		},
-		PrivateEntity: privEnt,
+	initWho := &Who{
+		Entities: []*Entity{GetPublicEntity(privEnt)},
+		Admin:    []int32{0},
+		Write:    nil,
+		Read:     nil,
 	}
-	errs := ValidateContents(config, cc)
+	errs := ValidateContents(initWho, cc)
 	assert.Len(t, errs, 0)
 
 	rando, err := GenerateEntity()
 	require.Nil(t, err)
 	cc.Who.Entities = append(cc.Who.Entities, GetPublicEntity(rando))
 
-	errs = ValidateContents(config, cc)
+	errs = ValidateContents(initWho, cc)
 	assert.NotEmpty(t, errs)
 }

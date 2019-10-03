@@ -34,6 +34,7 @@ message DirEntry {
 message VolumeSpec {
     string id = 1;
     CellSpec cell_spec = 2;
+    bytes aux_state = 3;
 }
 
 message Commit {

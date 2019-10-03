@@ -91,16 +91,18 @@ func wrapObject(parent Object, nameInParent string, o *webfsim.Object) (Object, 
 
 	switch o2 := o.Value.(type) {
 	case *webfsim.Object_Volume:
+		v := &Volume{
+			spec:       o2.Volume,
+			baseObject: base,
+		}
+		as := &auxState{v: v}
 		wfs := parent.getFS()
-		cell, err := wfs.setupCell(o2.Volume)
+		cell, err := wfs.setupCell(o2.Volume, as)
 		if err != nil {
 			return nil, err
 		}
-		return &Volume{
-			spec:       o2.Volume,
-			cell:       cell,
-			baseObject: base,
-		}, nil
+		v.cell = cell
+		return v, nil
 
 	case *webfsim.Object_File:
 		return &File{

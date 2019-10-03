@@ -5,8 +5,6 @@ import (
 	"context"
 	"errors"
 	fmt "fmt"
-	"io/ioutil"
-	"net/http"
 	"sync/atomic"
 
 	"github.com/golang/protobuf/proto"
@@ -21,7 +19,6 @@ var (
 
 type Spec struct {
 	Inner cells.Cell
-	Who   *Who
 
 	PrivateEntity *Entity
 	PublicEntity  *Entity
@@ -36,13 +33,16 @@ type Cell struct {
 	innerCell cells.Cell
 	spec      Spec
 
+	auxState cells.Cell
+
 	latestPayload atomic.Value
 }
 
-func New(spec Spec) *Cell {
+func New(spec Spec, auxState cells.Cell) *Cell {
 	cell := &Cell{
 		innerCell: spec.Inner,
 		spec:      spec,
+		auxState:  auxState,
 	}
 	return cell
 }
@@ -52,7 +52,7 @@ func (c *Cell) Get(ctx context.Context) ([]byte, error) {
 }
 
 func (c *Cell) get(ctx context.Context) ([]byte, error) {
-	contents, err := c.getContents(ctx)
+	contents, err := c.getContents(ctx, true)
 	if err != nil {
 		return nil, err
 	}
@@ -60,29 +60,43 @@ func (c *Cell) get(ctx context.Context) ([]byte, error) {
 		return nil, ErrCellUninitialized
 	}
 
-	errs := ValidateContents(c.spec, contents)
-	if len(errs) > 0 {
-		return nil, fmt.Errorf("validation errors %v", errs)
-	}
 	payload, err := GetPayload(contents, c.spec.PrivateEntity)
 	if err != nil {
 		return nil, err
 	}
-
 	c.latestPayload.Store(&payloadMapping{
 		contents: contents,
 		payload:  payload,
 	})
+
 	return payload, err
 }
 
-func (c *Cell) getContents(ctx context.Context) (*CellContents, error) {
+func (c *Cell) getContents(ctx context.Context, validate bool) (*CellContents, error) {
 	data, err := c.innerCell.Get(ctx)
 	if err != nil {
 		return nil, err
 	}
 	contents := &CellContents{}
 	if err := proto.Unmarshal(data, contents); err != nil {
+		return nil, err
+	}
+	if !validate {
+		return contents, nil
+	}
+
+	// validation
+	localWho, err := c.getLocalWho(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	errs := ValidateContents(localWho, contents)
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("validation errors %v", errs)
+	}
+
+	if err := c.setLocalWho(ctx, localWho, contents.Who); err != nil {
 		return nil, err
 	}
 	return contents, nil
@@ -135,10 +149,6 @@ func (c *Cell) cas(ctx context.Context, curContents, nextContents *CellContents)
 	return success, nil
 }
 
-func (c *Cell) GetSpec() interface{} {
-	return c.spec
-}
-
 func (c *Cell) URL() string {
 	return "ccp-" + c.innerCell.URL()
 }
@@ -147,17 +157,64 @@ func (c *Cell) getPrivate() *Entity {
 	return c.spec.PrivateEntity
 }
 
-func (c *Cell) init(ctx context.Context, retries int) error {
-	if retries < 0 {
-		return errors.New("cas failed")
+func (c *Cell) getLocalWho(ctx context.Context) (*Who, error) {
+	data, err := c.auxState.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(data) < 1 {
+		return nil, nil
+	}
+	ret := &Who{}
+	return ret, proto.Unmarshal(data, ret)
+}
+
+func (c *Cell) setLocalWho(ctx context.Context, cur, next *Who) error {
+	var curBytes []byte
+	var err error
+	if cur != nil {
+		curBytes, err = proto.Marshal(cur)
+		if err != nil {
+			return err
+		}
 	}
 
-	current, err := c.getContents(ctx)
+	nextBytes, err := proto.Marshal(next)
 	if err != nil {
 		return err
 	}
 
-	if current.Who != nil || current.What != nil {
+	success, err := c.auxState.CAS(ctx, curBytes, nextBytes)
+	if err != nil {
+		return err
+	}
+	if !success {
+		return errors.New("a race occurred")
+	}
+	return nil
+}
+
+// AcceptRemote accpets the Authorization settings from the
+// remote server.
+func (c *Cell) AcceptRemote(ctx context.Context) error {
+	current, err := c.getContents(ctx, false)
+	if err != nil {
+		return err
+	}
+	localWho, err := c.getLocalWho(ctx)
+	if err != nil {
+		return err
+	}
+	return c.setLocalWho(ctx, localWho, current.Who)
+}
+
+func (c *Cell) Init(ctx context.Context) error {
+	current, err := c.getContents(ctx, false)
+	if err != nil {
+		return err
+	}
+
+	if current.Who != nil {
 		return ErrCellInitialized
 	}
 
@@ -187,7 +244,7 @@ func (c *Cell) init(ctx context.Context, retries int) error {
 		return err
 	}
 	if !success {
-		return c.init(ctx, retries-1)
+		return errors.New("CAS failed during init. Another party using cell?")
 	}
 
 	c.latestPayload.Store(&payloadMapping{
@@ -197,15 +254,80 @@ func (c *Cell) init(ctx context.Context, retries int) error {
 	return nil
 }
 
-func httpPut(u string, reqBytes []byte) ([]byte, error) {
-	hreq, err := http.NewRequest(http.MethodPut, u, bytes.NewBuffer(reqBytes))
+func (c *Cell) AddEntity(ctx context.Context, ent *Entity) error {
+	prev, err := c.getContents(ctx, true)
 	if err != nil {
-		panic(err)
+		return err
 	}
-	hres, err := http.DefaultClient.Do(hreq)
+	next, err := AddEntity(prev, c.getPrivate(), ent)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	defer hres.Body.Close()
-	return ioutil.ReadAll(hres.Body)
+
+	success, err := c.cas(ctx, prev, next)
+	if err != nil {
+		return err
+	}
+	if !success {
+		return errors.New("CAS failed")
+	}
+	return nil
+}
+
+const (
+	roleAdmin = iota
+	roleWrite
+	roleRead
+)
+
+func (c *Cell) GrantAdmin(ctx context.Context, ent *Entity) error {
+	return c.grantRole(ctx, ent, roleAdmin)
+}
+
+func (c *Cell) GrantWrite(ctx context.Context, ent *Entity) error {
+	return c.grantRole(ctx, ent, roleWrite)
+}
+
+func (c *Cell) GrantRead(ctx context.Context, ent *Entity) error {
+	return c.grantRole(ctx, ent, roleRead)
+}
+
+func (c *Cell) grantRole(ctx context.Context, ent *Entity, role int) error {
+	prev, err := c.getContents(ctx, true)
+	if err != nil {
+		return err
+	}
+
+	var next *CellContents
+	switch role {
+	case roleAdmin:
+		next, err = AddAdmin(prev, c.getPrivate(), ent)
+	case roleWrite:
+		next, err = AddWriter(prev, c.getPrivate(), ent)
+	case roleRead:
+		next, err = AddReader(prev, c.getPrivate(), ent)
+	default:
+		panic("invalid role: " + fmt.Sprint(role))
+	}
+	if err != nil {
+		return err
+	}
+
+	success, err := c.cas(ctx, prev, next)
+	if err != nil {
+		return err
+	}
+	if !success {
+		return errors.New("CAS failed")
+	}
+	return nil
+}
+
+func (c *Cell) AuxState() string {
+	ctx := context.TODO()
+	who, err := c.getLocalWho(ctx)
+	if err != nil {
+		return "error"
+	}
+	return who.String()
 }

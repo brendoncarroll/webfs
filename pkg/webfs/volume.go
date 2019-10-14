@@ -23,9 +23,10 @@ type VolumeMutator func(webfsim.Commit) (*webfsim.Commit, error)
 type ObjectMutator func(*webfsim.Object) (*webfsim.Object, error)
 
 type Volume struct {
-	spec *webfsim.VolumeSpec
-	cell Cell
-	opts *Options
+	spec  *webfsim.VolumeSpec
+	cell  Cell
+	opts  *Options
+	store *Store
 
 	baseObject
 }
@@ -258,6 +259,10 @@ func (v *Volume) URL() string {
 }
 
 func (v *Volume) getStore() *Store {
+	if v.store != nil {
+		return v.store
+	}
+
 	var parentStore *Store
 	if v.parent != nil {
 		parentStore = v.parent.getStore()
@@ -268,8 +273,10 @@ func (v *Volume) getStore() *Store {
 	opts := v.getOptions()
 	store, err := newStore(parentStore, opts.StoreSpecs)
 	if err != nil {
-		panic(err)
+		panic("invalid store: " + err.Error())
 	}
+
+	v.store = store
 	return store
 }
 
@@ -299,42 +306,3 @@ func (v *Volume) init(ctx context.Context) error {
 	}
 	return err
 }
-
-// func (v *Volume) updateSpec(ctx context.Context) error {
-// 	c, ok := v.cell.(cells.GetSpec)
-// 	if !ok {
-// 		return nil
-// 	}
-// 	if v.parent == nil {
-// 		return errors.New("can't update spec for volume without parent")
-// 	}
-
-// 	volSpec := v.spec
-// 	cellSpec, err := cellSpec2Model(c.GetSpec())
-// 	if err != nil {
-// 		return err
-// 	}
-// 	volSpec.CellSpec = cellSpec
-// 	v.spec = volSpec
-
-// 	var put func(context.Context, ObjectMutator) error
-// 	switch par := v.parent.(type) {
-// 	case *Volume:
-// 		put = par.put
-// 	case *Dir:
-// 		put = func(ctx context.Context, fn ObjectMutator) error {
-// 			return par.put(ctx, v.nameInParent, fn)
-// 		}
-// 	default:
-// 		panic("invalid parent")
-// 	}
-
-// 	return put(ctx, func(x *webfsim.Object) (*webfsim.Object, error) {
-// 		y := &webfsim.Object{
-// 			Value: &webfsim.Object_Volume{
-// 				Volume: volSpec,
-// 			},
-// 		}
-// 		return y, nil
-// 	})
-// }

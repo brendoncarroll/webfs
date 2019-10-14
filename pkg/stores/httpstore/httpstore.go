@@ -25,25 +25,29 @@ type HttpStore struct {
 }
 
 func New(endpoint string, prefix string, headers map[string]string) (*HttpStore, error) {
-	mbsUrl := endpoint + "/.maxBlobSize"
-	resp, err := http.Get(mbsUrl)
+	s := &HttpStore{
+		endpoint: endpoint,
+		prefix:   prefix,
+		hc:       http.DefaultClient,
+		headers:  headers,
+	}
+
+	mbsURL := endpoint + "/.maxBlobSize"
+	r := s.newRequest(context.TODO(), http.MethodGet, mbsURL, nil)
+	resp, err := s.hc.Do(r)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	var maxBlobSize int
-	if _, err := fmt.Fscanf(resp.Body, "%d", &maxBlobSize); err != nil {
-		return nil, err
+	if resp.StatusCode != http.StatusOK {
+		return nil, errorFromRes(resp)
 	}
 
-	return &HttpStore{
-		endpoint:    endpoint,
-		maxBlobSize: maxBlobSize,
-		prefix:      prefix,
-		hc:          http.DefaultClient,
-		headers:     headers,
-	}, nil
+	if _, err := fmt.Fscanf(resp.Body, "%d", &s.maxBlobSize); err != nil {
+		return nil, err
+	}
+	return s, nil
 }
 
 func (hs *HttpStore) Get(ctx context.Context, key string) ([]byte, error) {
@@ -79,7 +83,7 @@ func (hs *HttpStore) Get(ctx context.Context, key string) ([]byte, error) {
 		return nil, stores.ErrNotFound
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("got non-200 status: %s", resp.Status)
+		return nil, errorFromRes(resp)
 	}
 
 	data, err := ioutil.ReadAll(resp.Body)
@@ -141,7 +145,7 @@ func (hs *HttpStore) Post(ctx context.Context, prefix string, data []byte) (stri
 		return "", err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("endpoint=%s status=%d body=%s", hs.endpoint, resp.StatusCode, string(body))
+		return "", errorFromRes(resp)
 	}
 	key := hs.prefix + "/" + string(body)
 	return key, nil
@@ -165,7 +169,7 @@ func (hs *HttpStore) Delete(ctx context.Context, key string) (err error) {
 		return err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("error not OK: %d %s", resp.StatusCode, resp.Status)
+		return errorFromRes(resp)
 	}
 	return nil
 }
@@ -197,4 +201,13 @@ func (hs *HttpStore) newRequest(ctx context.Context, method, u string, body io.R
 		r.Header.Set(k, v)
 	}
 	return r
+}
+
+func errorFromRes(r *http.Response) error {
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		log.Println(err)
+	}
+	msg := string(body)
+	return fmt.Errorf("%s: %s", r.Status, msg)
 }

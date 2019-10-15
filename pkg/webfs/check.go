@@ -21,11 +21,7 @@ func (wfs *WebFS) Check(ctx context.Context, ch chan RefStatus) error {
 		s := o.getStore()
 
 		cont, err := o.RefIter(ctx, func(ref Ref) bool {
-			rs, err := webref.Check(ctx, s, ref)
-			if err != nil {
-				log.Println(err)
-				return false
-			}
+			rs := webref.Check(ctx, s, ref)
 
 			for i := range rs {
 				ch <- RefStatus{

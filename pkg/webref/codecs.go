@@ -18,14 +18,21 @@ const (
 )
 
 func Load(ctx context.Context, s stores.Read, ref Ref, x interface{}) error {
+	aref, ok := ref.Ref.(*Ref_Annotated)
+	if !ok {
+		return errors.New("can't load from non-annotated ref")
+	}
+	annotations := aref.Annotated.Annotations
+	codec := ""
+	if annotations != nil {
+		codec = annotations["codec"]
+	}
+
 	data, err := Get(ctx, s, ref)
 	if err != nil {
 		return err
 	}
-	codec := ""
-	if ref.Attrs != nil {
-		codec = ref.Attrs["codec"]
-	}
+
 	return Decode(codec, data, x)
 }
 
@@ -43,11 +50,15 @@ func Store(ctx context.Context, s stores.Post, opts Options, x interface{}) (*Re
 	if err != nil {
 		return nil, err
 	}
-	if ref.Attrs == nil {
-		ref.Attrs = map[string]string{}
+	aref := &Annotated{
+		Ref: ref,
+		Annotations: map[string]string{
+			"codec": codec,
+		},
 	}
-	ref.Attrs["codec"] = codec
-	return ref, nil
+	return &Ref{
+		Ref: &Ref_Annotated{aref},
+	}, nil
 }
 
 func SizeOf(s stores.Post, o Options, x interface{}) int {

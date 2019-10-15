@@ -11,13 +11,12 @@ import (
 	"math/bits"
 
 	"golang.org/x/crypto/sha3"
-
 	// golang.org/x/crypto/internal/chacha20 is internal
 	"github.com/Yawning/chacha20"
 	"github.com/brendoncarroll/webfs/pkg/stores"
 )
 
-func PostCrypto(ctx context.Context, s stores.Post, prefix string, data []byte, o Options) (*CryptoRef, error) {
+func PostCrypto(ctx context.Context, s stores.Post, o Options, prefix string, data []byte) (*Ref, error) {
 	secret := generateSecret(data, o.SecretSeed)
 
 	ctextLen := len(data)
@@ -34,20 +33,25 @@ func PostCrypto(ctx context.Context, s stores.Post, prefix string, data []byte, 
 		return nil, err
 	}
 
-	key, err := s.Post(ctx, prefix, ctext)
+	ref, err := PostSingle(ctx, s, prefix, ctext, o)
 	if err != nil {
 		return nil, err
 	}
-	return &CryptoRef{
-		EncAlgo: o.EncAlgo,
-		Dek:     secret,
-		Url:     string(key),
-		Length:  int32(len(data)),
+
+	return &Ref{
+		Ref: &Ref_Crypto{
+			&Crypto{
+				Ref:     ref,
+				EncAlgo: o.EncAlgo,
+				Dek:     secret,
+				Length:  int32(len(data)),
+			},
+		},
 	}, nil
 }
 
-func GetCrypto(ctx context.Context, store stores.Read, r *CryptoRef) ([]byte, error) {
-	payload, err := store.Get(ctx, r.Url)
+func GetCrypto(ctx context.Context, store stores.Read, r *Crypto) ([]byte, error) {
+	payload, err := Get(ctx, store, *r.Ref)
 	if err != nil {
 		return nil, err
 	}
@@ -83,13 +87,12 @@ func crypt(algo EncAlgo, secret, in, out []byte) error {
 	return nil
 }
 
-func DeleteCrypto(ctx context.Context, s stores.Delete, r *CryptoRef) error {
-	return s.Delete(ctx, r.Url)
+func DeleteCrypto(ctx context.Context, s stores.Delete, r *Crypto) error {
+	return Delete(ctx, s, *r.Ref)
 }
 
-func CheckCrypto(ctx context.Context, s stores.Check, r *CryptoRef) RefStatus {
-	err := s.Check(ctx, r.Url)
-	return RefStatus{URL: r.Url, Error: err}
+func CheckCrypto(ctx context.Context, s stores.Check, r *Crypto) []RefStatus {
+	return Check(ctx, s, *r.Ref)
 }
 
 // secrets are generated from a seed and the

@@ -231,6 +231,8 @@ github.com/whyrusleeping/tar-utils v0.0.0-20180509141711-8c6c8ba81d5c/go.mod h1:
 github.com/xanzy/ssh-agent v0.2.1/go.mod h1:mLlQY/MoOhWBj+gOGMQkOeiEvkx+8pJSI+0Bx9h2kr4=
 github.com/xordataexchange/crypt v0.0.3-0.20170626215501-b2862e3d0a77/go.mod h1:aYKd//L2LvnjZzWKhF00oedf4jCCReLcmhLdhm1A27Q=
 github.com/yunify/qingstor-sdk-go v2.2.15+incompatible/go.mod h1:w6wqLDQ5bBTzxGJ55581UrSwLrsTAsdo9N6yX/8d9RY=
+github.com/zfjagann/golang-ring v0.0.0-20190304061218-d34796e0a6c2 h1:UQwvu7FjUEdVYofx0U6bsc5odNE7wa5TSA0fl559GcA=
+github.com/zfjagann/golang-ring v0.0.0-20190304061218-d34796e0a6c2/go.mod h1:0MsIttMJIF/8Y7x0XjonJP7K99t3sR6bjj4m5S4JmqU=
 go.etcd.io/bbolt v1.3.2/go.mod h1:IbVyRI1SCnLcuJnV2u8VeU0CEYM7e686BmAb1XKL+uU=
 go.opencensus.io v0.20.1/go.mod h1:6WKK9ahsWS3RSO+PY9ZHZUfv2irvY6gN279GOPZjmmk=
 go.opencensus.io v0.20.2/go.mod h1:6WKK9ahsWS3RSO+PY9ZHZUfv2irvY6gN279GOPZjmmk=

@@ -30,17 +30,6 @@ func (s *Store) MaxBlobSize() int {
 	return s.post.MaxBlobSize()
 }
 
-func (s *Store) Check(ctx context.Context, ref *webref.Ref) []webref.RefStatus {
-	checker, ok := s.get.(webref.Checker)
-	if !ok {
-		_, err := s.get.Get(ctx, ref)
-		return []webref.RefStatus{
-			{Error: err},
-		}
-	}
-	return checker.Check(ctx, ref)
-}
-
 func (s *Store) Delete(ctx context.Context, ref *webref.Ref) error {
 	deleter, ok := s.post.(webref.Deleter)
 	if !ok {

@@ -179,6 +179,9 @@ func (hs *HttpStore) removePrefix(x string) (string, error) {
 		return "", errors.New("Wrong key: " + x)
 	}
 	y := x[len(hs.prefix):]
+	if y[0] == '/' {
+		return y[1:], nil
+	}
 	return y, nil
 }
 

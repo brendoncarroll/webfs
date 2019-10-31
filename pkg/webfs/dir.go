@@ -12,7 +12,11 @@ import (
 	"github.com/brendoncarroll/webfs/pkg/wrds"
 )
 
-type DirMutator func(ctx context.Context, cur *webfsim.Dir) (*webfsim.Dir, error)
+type DirMutator func(cur *webfsim.Dir) (*webfsim.Dir, error)
+
+func IdentityDM(ctx context.Context, cur *webfsim.Dir) (*webfsim.Dir, error) {
+	return cur, nil
+}
 
 type DirEntry struct {
 	Name   string
@@ -24,7 +28,7 @@ type Dir struct {
 	baseObject
 }
 
-func newDir(ctx context.Context, parent Object, name string) (*Dir, error) {
+func NewDir(ctx context.Context, parent Object, name string) (*Dir, error) {
 	if parent == nil {
 		return nil, errors.New("dir must have parent")
 	}
@@ -34,7 +38,7 @@ func newDir(ctx context.Context, parent Object, name string) (*Dir, error) {
 			nameInParent: name,
 		},
 	}
-	err := dir.Apply(ctx, func(ctx context.Context, cur *webfsim.Dir) (*webfsim.Dir, error) {
+	err := dir.Apply(ctx, func(cur *webfsim.Dir) (*webfsim.Dir, error) {
 		if cur != nil {
 			return nil, errors.New("already exists")
 		}
@@ -67,7 +71,7 @@ func (d *Dir) Lookup(ctx context.Context, p Path) (Object, error) {
 		return nil, err
 	}
 	if len(objs) < 1 {
-		return nil, nil
+		return nil, ErrNotExist
 	}
 	return objs[len(objs)-1], nil
 }
@@ -125,7 +129,7 @@ func (d *Dir) Put(ctx context.Context, ent webfsim.DirEntry) error {
 	opts := d.getOptions()
 	ctx = webref.SetCodecCtx(ctx, opts.DataOpts.Codec)
 
-	return d.Apply(ctx, func(ctx context.Context, cur *webfsim.Dir) (*webfsim.Dir, error) {
+	return d.Apply(ctx, func(cur *webfsim.Dir) (*webfsim.Dir, error) {
 		return webfsim.DirPut(ctx, d.getStore(), *cur, ent)
 	})
 }
@@ -134,7 +138,7 @@ func (d *Dir) Delete(ctx context.Context, name string) error {
 	opts := d.getOptions()
 	ctx = webref.SetCodecCtx(ctx, opts.DataOpts.Codec)
 
-	return d.Apply(ctx, func(ctx context.Context, cur *webfsim.Dir) (*webfsim.Dir, error) {
+	return d.Apply(ctx, func(cur *webfsim.Dir) (*webfsim.Dir, error) {
 		return webfsim.DirDelete(ctx, d.getStore(), *cur, name)
 	})
 }
@@ -191,6 +195,10 @@ func (d Dir) FileInfo() FileInfo {
 	}
 }
 
+func (d Dir) FS() *WebFS {
+	return d.getFS()
+}
+
 func (d *Dir) split(ctx context.Context, s webref.Poster, x webfsim.Dir) (*webfsim.Dir, error) {
 	newTree, err := x.Tree.Split(ctx, s)
 	if err != nil {
@@ -204,7 +212,7 @@ func (d *Dir) put(ctx context.Context, name string, fn ObjectMutator) error {
 	opts := d.getOptions()
 	ctx = webref.SetCodecCtx(ctx, opts.DataOpts.Codec)
 
-	return d.Apply(ctx, func(ctx context.Context, cur *webfsim.Dir) (*webfsim.Dir, error) {
+	return d.Apply(ctx, func(cur *webfsim.Dir) (*webfsim.Dir, error) {
 		// get the entry at name
 		ent, err := webfsim.DirGet(ctx, store, *cur, name)
 		if err != nil {
@@ -253,7 +261,7 @@ func (d *Dir) Apply(ctx context.Context, fn DirMutator) error {
 		}
 
 		var err error
-		newDir, err = fn(ctx, curDir)
+		newDir, err = fn(curDir)
 		if err != nil {
 			newDir = nil
 			return nil, err
@@ -271,4 +279,10 @@ func (d *Dir) Apply(ctx context.Context, fn DirMutator) error {
 		d.m = *newDir
 	}
 	return nil
+}
+
+func (d *Dir) Sync(ctx context.Context) error {
+	return d.Apply(ctx, func(cur *webfsim.Dir) (*webfsim.Dir, error) {
+		return nil, nil
+	})
 }

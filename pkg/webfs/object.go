@@ -63,7 +63,7 @@ func wrapObject(parent Object, nameInParent string, o *webfsim.Object) (Object, 
 	switch o2 := o.Value.(type) {
 	case *webfsim.Object_Volume:
 		ctx := context.TODO()
-		return newVolume(ctx, o2.Volume, parent.getFS(), parent, nameInParent)
+		return setupVolume(ctx, o2.Volume, parent.getFS(), parent, nameInParent)
 
 	case *webfsim.Object_File:
 		return &File{
@@ -80,4 +80,43 @@ func wrapObject(parent Object, nameInParent string, o *webfsim.Object) (Object, 
 	default:
 		return nil, errors.New("Invalid Object")
 	}
+}
+
+func putAt(ctx context.Context, parent Object, o *webfsim.Object, name string) error {
+	var put func(context.Context, ObjectMutator) error
+	switch x := parent.(type) {
+	case *Volume:
+		if name != "" {
+			return errors.New("volumes do not support entries")
+		}
+		put = x.put
+	case *Dir:
+		put = func(ctx context.Context, fn ObjectMutator) error {
+			return x.put(ctx, name, fn)
+		}
+	default:
+		panic("lookup returned file")
+	}
+	err := put(ctx, func(cur *webfsim.Object) (*webfsim.Object, error) {
+		if cur != nil {
+			return nil, errors.New("object already here")
+		}
+		return o, nil
+	})
+	return err
+}
+
+func containingVolume(o Object) *Volume {
+	for {
+		par := o.getParent()
+		if par == nil {
+			break
+		}
+		v, ok := par.(*Volume)
+		if ok {
+			return v
+		}
+		o = par
+	}
+	return nil
 }

@@ -34,3 +34,7 @@ func (f *File) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadR
 	resp.Data = buf[:n]
 	return nil
 }
+
+func (f *File) getObject() webfs.Object {
+	return f.f
+}

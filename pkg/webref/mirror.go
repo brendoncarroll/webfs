@@ -38,11 +38,11 @@ func DeleteMirror(ctx context.Context, s stores.Delete, r *Mirror) error {
 	return nil
 }
 
-func CheckMirror(ctx context.Context, s stores.Check, r *Mirror) ([]RefStatus, error) {
+func CheckMirror(ctx context.Context, s stores.Check, r *Mirror) []RefStatus {
 	stats := []RefStatus{}
 	for _, x := range r.Refs {
-		stats2 := Check(ctx, s, *x)
+		stats2 := Check(ctx, s, x)
 		stats = append(stats, stats2...)
 	}
-	return stats, nil
+	return stats
 }

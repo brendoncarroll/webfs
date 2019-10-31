@@ -17,10 +17,6 @@ type Poster interface {
 	MaxBlobSize() int
 }
 
-type Checker interface {
-	Check(ctx context.Context, ref *Ref) []RefStatus
-}
-
 type Deleter interface {
 	Delete(ctx context.Context, ref *Ref) error
 }
@@ -70,6 +66,8 @@ func GetURLs(ref *Ref) []string {
 			ret = append(ret, us...)
 		}
 		return ret
+	case *Ref_Annotated:
+		return GetURLs(r.Annotated.Ref)
 	default:
 		panic("invalid ref type")
 	}
@@ -84,12 +82,19 @@ func (rs RefStatus) IsAlive() bool {
 	return rs.Error == nil
 }
 
-func Check(ctx context.Context, s stores.Check, ref Ref) []RefStatus {
+func Check(ctx context.Context, s stores.Check, ref *Ref) []RefStatus {
 	switch r := ref.Ref.(type) {
 	case *Ref_Url:
-		return CheckSingle(ctx, s, r.Url)
+		err := s.Check(ctx, r.Url)
+		return []RefStatus{
+			{URL: r.Url, Error: err},
+		}
+	case *Ref_Mirror:
+		return CheckMirror(ctx, s, r.Mirror)
 	case *Ref_Crypto:
-		return CheckCrypto(ctx, s, r.Crypto)
+		return Check(ctx, s, r.Crypto.Ref)
+	case *Ref_Annotated:
+		return Check(ctx, s, r.Annotated.Ref)
 	default:
 		panic("invalid ref type")
 	}

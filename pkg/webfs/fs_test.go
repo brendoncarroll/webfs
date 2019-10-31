@@ -164,3 +164,51 @@ func TestNewVolume(t *testing.T) {
 	require.Nil(t, err)
 	assert.Len(t, ents, 1)
 }
+
+func TestMove(t *testing.T) {
+
+	const (
+		p1 = "testfile.txt"
+		p2 = "testfile2.txt"
+	)
+
+	wfs := getTestFS()
+	err := wfs.Mkdir(ctx, "")
+	require.Nil(t, err)
+
+	buf := bytes.NewBuffer([]byte("test file contents"))
+	err = wfs.ImportFile(ctx, buf, p1)
+	require.Nil(t, err)
+
+	f, err := wfs.Lookup(ctx, p1)
+	require.Nil(t, err)
+	require.NotNil(t, f)
+
+	err = wfs.Move(ctx, f, p2)
+	require.Nil(t, err)
+
+	_, err = wfs.Lookup(ctx, p1)
+	require.Equal(t, ErrNotExist, err)
+
+	f, err = wfs.Lookup(ctx, p2)
+	require.Nil(t, err)
+	require.NotNil(t, f)
+}
+
+func TestLookupParent(t *testing.T) {
+	wfs := getTestFS()
+	err := wfs.Mkdir(ctx, "")
+	require.Nil(t, err)
+
+	const p = "testfile.txt"
+	err = wfs.ImportFile(ctx, nil, p)
+	require.Nil(t, err)
+
+	o, name, err := wfs.lookupParent(ctx, ParsePath(p))
+	require.Nil(t, err)
+	_, ok := o.(*Dir)
+	if !ok {
+		t.Error("did not find root dir")
+	}
+	require.Equal(t, p, name)
+}

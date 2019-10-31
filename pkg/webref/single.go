@@ -14,11 +14,6 @@ func GetSingle(ctx context.Context, s stores.Read, u string) ([]byte, error) {
 	return data, nil
 }
 
-func CheckSingle(ctx context.Context, s stores.Check, u string) []RefStatus {
-	err := s.Check(ctx, u)
-	return []RefStatus{{URL: u, Error: err}}
-}
-
 func DeleteSingle(ctx context.Context, s stores.Delete, u string) error {
 	return s.Delete(ctx, u)
 }

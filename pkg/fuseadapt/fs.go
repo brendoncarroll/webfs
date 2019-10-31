@@ -30,3 +30,18 @@ func (fs *FS) Root() (fusefs.Node, error) {
 	}
 	return newDir(d), nil
 }
+
+func wrap(x webfs.Object) fusefs.Node {
+	switch x := x.(type) {
+	case *webfs.Dir:
+		return newDir(x)
+	case *webfs.File:
+		return newFile(x)
+	default:
+		panic("unsupported object")
+	}
+}
+
+type getObject interface {
+	getObject() webfs.Object
+}

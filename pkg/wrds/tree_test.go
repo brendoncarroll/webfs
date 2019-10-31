@@ -80,3 +80,33 @@ func TestMinGt(t *testing.T) {
 	require.Nil(t, err)
 	assert.Nil(t, ent)
 }
+
+func TestDelete(t *testing.T) {
+	s := webref.NewMemStore(4096)
+
+	tree := NewTree()
+
+	const N = 1000
+	var err error
+	for i := 0; i < N; i++ {
+		key := []byte(fmt.Sprintf("key%03d", i))
+		ref := &webref.Ref{}
+		tree, err = tree.Put(ctx, s, key, ref)
+		require.Nil(t, err)
+	}
+
+	deleteKeys := []string{
+		"key004",
+		"key000",
+		"key849",
+		"key999",
+	}
+
+	for _, key := range deleteKeys {
+		tree2, err := tree.Delete(ctx, s, []byte(key))
+		require.Nil(t, err)
+		ent, err := tree2.Get(ctx, s, []byte(key))
+		require.Nil(t, err)
+		require.Nil(t, ent)
+	}
+}

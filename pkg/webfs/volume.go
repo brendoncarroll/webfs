@@ -19,6 +19,7 @@ var ErrCASFailed = errors.New("CAS failed. Should Retry")
 
 type Cell = cells.Cell
 
+type SpecMutator func(webfsim.VolumeSpec) webfsim.VolumeSpec
 type VolumeMutator func(webfsim.Commit) (*webfsim.Commit, error)
 type ObjectMutator func(*webfsim.Object) (*webfsim.Object, error)
 
@@ -31,7 +32,14 @@ type Volume struct {
 	baseObject
 }
 
-func newVolume(ctx context.Context, spec *webfsim.VolumeSpec, fs *WebFS, parent Object, nameInParent string) (*Volume, error) {
+func newVolume(ctx context.Context, parent Object, nameInParent string) (*Volume, error) {
+	spec := &webfsim.VolumeSpec{
+		Id: generateVolId(),
+	}
+	return setupVolume(ctx, spec, parent.getFS(), parent, nameInParent)
+}
+
+func setupVolume(ctx context.Context, spec *webfsim.VolumeSpec, fs *WebFS, parent Object, nameInParent string) (*Volume, error) {
 	v := &Volume{
 		spec: spec,
 		baseObject: baseObject{
@@ -41,16 +49,18 @@ func newVolume(ctx context.Context, spec *webfsim.VolumeSpec, fs *WebFS, parent 
 		},
 	}
 	as := &auxState{v: v}
-	cell, err := fs.setupCell(spec, as)
+	cell, err := model2Cell(spec.CellSpec, as)
 	if err != nil {
 		return nil, err
 	}
 	v.cell = cell
-
-	return v, v.init(ctx)
+	if err := v.init(ctx); err != nil {
+		return nil, err
+	}
+	return v, nil
 }
 
-func newRootVolume(ctx context.Context, spec *webfsim.VolumeSpec, cell cells.Cell, fs *WebFS) (*Volume, error) {
+func setupRootVolume(ctx context.Context, spec *webfsim.VolumeSpec, cell cells.Cell, fs *WebFS) (*Volume, error) {
 	v := &Volume{
 		spec: spec,
 		baseObject: baseObject{
@@ -246,6 +256,13 @@ func (v *Volume) Apply(ctx context.Context, f VolumeMutator) error {
 		return errors.New("could not complete CAS")
 	}
 
+	return nil
+}
+
+func (v *Volume) ApplySpec(ctx context.Context, f SpecMutator) error {
+	if v.parent == nil {
+		return errors.New("no spec for root cell")
+	}
 	return nil
 }
 

@@ -17,6 +17,7 @@ func MountAndRun(wfs *webfs.WebFS, p string) error {
 
 	opts := []fuse.MountOption{
 		fuse.VolumeName("WebFS"),
+		fuse.WritebackCache(),
 	}
 	conn, err := fuse.Mount(p, opts...)
 	if err != nil {
@@ -50,7 +51,14 @@ func MountAndRun(wfs *webfs.WebFS, p string) error {
 		errs <- lastErr
 	}()
 
-	if err := fusefs.Serve(conn, fs); err != nil {
+	config := fusefs.Config{
+		// Debug: func(msg interface{}) {
+		// 	data, _ := json.Marshal(msg)
+		// 	log.Println(string(data))
+		// },
+	}
+	server := fusefs.New(conn, &config)
+	if err := server.Serve(fs); err != nil {
 		log.Println(err)
 	}
 

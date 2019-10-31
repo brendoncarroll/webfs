@@ -10,7 +10,6 @@ import (
 type Store interface {
 	Getter
 	Poster
-	Checker
 	Deleter
 }
 
@@ -20,6 +19,10 @@ type BasicStore struct {
 
 func (s *BasicStore) Get(ctx context.Context, ref *Ref) ([]byte, error) {
 	return Get(ctx, s.Store, *ref)
+}
+
+func (s *BasicStore) Check(ctx context.Context, ref *Ref) []RefStatus {
+	return nil
 }
 
 func (s *BasicStore) Post(ctx context.Context, data []byte) (*Ref, error) {

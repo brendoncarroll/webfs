@@ -274,7 +274,7 @@ func (t *Tree) delete(ctx context.Context, s ReadPost, key []byte) (*Tree, error
 			return nil, err
 		}
 
-		ent := &TreeEntry{Key: subTree.MinKey(), Ref: ref}
+		ent := &TreeEntry{Key: newSt.MinKey(), Ref: ref}
 		newEntries = append(newEntries, t.Entries[:i]...)
 		newEntries = append(newEntries, ent)
 		if i < len(t.Entries)-1 {
@@ -282,14 +282,13 @@ func (t *Tree) delete(ctx context.Context, s ReadPost, key []byte) (*Tree, error
 		}
 
 	case t.Level == 1:
-		ent := t.Entries[i]
-		if bytes.Compare(key, ent.Key) == 0 {
-			newEntries = append(newEntries, t.Entries[:i]...)
-			if i < len(t.Entries)-1 {
-				newEntries = append(newEntries, t.Entries[i+1:]...)
+		for _, ent := range t.Entries {
+			if bytes.Compare(key, ent.Key) != 0 {
+				newEntries = append(newEntries, ent)
 			}
-		} else {
-			return t, nil
+		}
+		if len(newEntries) == len(t.Entries) {
+			return t, errors.New("key does not exist")
 		}
 	default:
 		return nil, errors.New("Invalid tree level")
@@ -300,43 +299,6 @@ func (t *Tree) delete(ctx context.Context, s ReadPost, key []byte) (*Tree, error
 		Entries: newEntries,
 	}
 	return newTree, nil
-
-	switch {
-	case t.Level == 1:
-		newEntries := []*TreeEntry{}
-		newEntries = append(newEntries, t.Entries[:i]...)
-		newEntries = append(newEntries, t.Entries[i+1:]...)
-		if len(newEntries) == 0 {
-			return nil, nil
-		}
-		newTree := Tree{Entries: newEntries}
-		return &newTree, nil
-	case t.Level > 1:
-		subTree, err := t.getSubtree(ctx, s, i)
-		if err != nil {
-			return nil, err
-		}
-		newSt, err := subTree.delete(ctx, s, key)
-		if err != nil {
-			return nil, err
-		}
-
-		newEntries := []*TreeEntry{}
-		newEntries = append(newEntries, t.Entries[:i]...)
-		if newSt != nil {
-			ref, err := webref.EncodeAndPost(ctx, s, newSt)
-			if err != nil {
-				return nil, err
-			}
-			newEnt := &TreeEntry{Key: t.Entries[i].Key, Ref: ref}
-			newEntries = append(newEntries, newEnt)
-		}
-		newEntries = append(newEntries, t.Entries[i+1:]...)
-		newTree := Tree{Level: t.Level, Entries: newEntries}
-		return &newTree, nil
-	default:
-		return nil, errors.New("invalid tree level")
-	}
 }
 
 func (t *Tree) MinKey() []byte {

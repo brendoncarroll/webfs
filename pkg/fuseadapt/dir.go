@@ -3,12 +3,22 @@ package fuseadapt
 import (
 	"context"
 	"errors"
+	"log"
+	"os"
 	"time"
 
 	"bazil.org/fuse"
 	fusefs "bazil.org/fuse/fs"
 	"github.com/brendoncarroll/webfs/pkg/webfs"
 )
+
+var _ interface {
+	fusefs.Node
+	fusefs.NodeRenamer
+	fusefs.NodeMkdirer
+	fusefs.NodeLinker
+	fusefs.NodeRemover
+} = &Dir{}
 
 type Dir struct {
 	d *webfs.Dir
@@ -26,7 +36,7 @@ func (d *Dir) Attr(ctx context.Context, attr *fuse.Attr) error {
 func (d *Dir) Lookup(ctx context.Context, req *fuse.LookupRequest, resp *fuse.LookupResponse) (fusefs.Node, error) {
 	o, err := d.d.Lookup(ctx, webfs.ParsePath(req.Name))
 	if err != nil {
-		return nil, err
+		return nil, fuseErr(err)
 	}
 	switch x := o.(type) {
 	case *webfs.Dir:
@@ -34,7 +44,9 @@ func (d *Dir) Lookup(ctx context.Context, req *fuse.LookupRequest, resp *fuse.Lo
 	case *webfs.File:
 		return newFile(x), nil
 	default:
-		return nil, errors.New("cannot create fuse node from webfs object")
+		err = errors.New("cannot create fuse node from webfs object")
+		log.Println(err)
+		return nil, err
 	}
 }
 
@@ -48,6 +60,45 @@ func (d *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 		fuseEnts[i] = toDirent(ents[i])
 	}
 	return fuseEnts, nil
+}
+
+func (d *Dir) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fusefs.Node, error) {
+	d2, err := webfs.NewDir(ctx, d.d, req.Name)
+	if err != nil {
+		return nil, err
+	}
+	return newDir(d2), nil
+}
+
+func (d *Dir) Link(ctx context.Context, req *fuse.LinkRequest, old fusefs.Node) (fusefs.Node, error) {
+	o := old.(getObject).getObject()
+	fs := d.d.FS()
+	dst := append(d.d.Path(), req.NewName).String()
+	oCopy, err := fs.Copy(ctx, o, dst)
+	if err != nil {
+		return nil, err
+	}
+	return wrap(oCopy), nil
+}
+
+func (d *Dir) Rename(ctx context.Context, req *fuse.RenameRequest, newDir fusefs.Node) error {
+	o, err := d.d.Lookup(ctx, webfs.Path{req.OldName})
+	if err != nil {
+		return fuseErr(err)
+	}
+	dst := newDir.(*Dir).d.Path()
+	dst = append(dst, req.NewName)
+
+	fs := d.d.FS()
+	return fs.Move(ctx, o, dst.String())
+}
+
+func (d *Dir) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
+	return d.d.Delete(ctx, req.Name)
+}
+
+func (d *Dir) getObject() webfs.Object {
+	return d.d
 }
 
 func toDirent(x webfs.DirEntry) fuse.Dirent {
@@ -77,5 +128,16 @@ func toAttr(finfo webfs.FileInfo) fuse.Attr {
 		//Blocks:    finfo.Size / 512,
 		Size: finfo.Size,
 		Mode: finfo.Mode,
+	}
+}
+
+func fuseErr(err error) error {
+	switch err {
+	case os.ErrNotExist:
+		return fuse.ENOENT
+	case os.ErrExist:
+		return fuse.EEXIST
+	default:
+		return err
 	}
 }

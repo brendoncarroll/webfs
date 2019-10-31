@@ -14,6 +14,10 @@ import (
 
 type FileMutator func(cur webfsim.File) (*webfsim.File, error)
 
+func IdentityFM(cur webfsim.File) (*webfsim.File, error) {
+	return &cur, nil
+}
+
 type File struct {
 	m webfsim.File
 
@@ -126,6 +130,12 @@ func (f File) FileInfo() FileInfo {
 
 func (f *File) RefIter(ctx context.Context, fn func(webref.Ref) bool) (bool, error) {
 	return refIterTree(ctx, f.getStore(), f.m.Tree, fn)
+}
+
+func (f *File) Sync(ctx context.Context) error {
+	return f.Apply(ctx, func(cur webfsim.File) (*webfsim.File, error) {
+		return &f.m, nil
+	})
 }
 
 func (f *File) Apply(ctx context.Context, fn FileMutator) error {

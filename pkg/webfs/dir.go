@@ -47,26 +47,22 @@ func newDir(ctx context.Context, parent Object, name string) (*Dir, error) {
 	return dir, nil
 }
 
-func (d *Dir) Find(ctx context.Context, p Path, objs []Object) ([]Object, error) {
+func (d *Dir) GetAtPath(ctx context.Context, p Path, objs []Object) ([]Object, error) {
 	if len(p) == 0 {
 		return append(objs, d), nil
 	}
-	ent, err := d.Get(ctx, p[0])
+	o, err := d.Get(ctx, p[0])
 	if err != nil {
 		return nil, err
 	}
-	if ent == nil {
+	if o == nil {
 		return nil, nil
 	}
-	o, err := wrapObject(d, ent.Name, ent.Object)
-	if err != nil {
-		return nil, err
-	}
-	return o.Find(ctx, p[1:], objs)
+	return o.GetAtPath(ctx, p[1:], objs)
 }
 
 func (d *Dir) Lookup(ctx context.Context, p Path) (Object, error) {
-	objs, err := d.Find(ctx, p, []Object{})
+	objs, err := d.GetAtPath(ctx, p, []Object{})
 	if err != nil {
 		return nil, err
 	}
@@ -114,8 +110,15 @@ func (d *Dir) Walk(ctx context.Context, f func(Object) bool) (bool, error) {
 	return cont, nil
 }
 
-func (d *Dir) Get(ctx context.Context, name string) (*webfsim.DirEntry, error) {
-	return webfsim.DirGet(ctx, d.getStore(), d.m, name)
+func (d *Dir) Get(ctx context.Context, name string) (Object, error) {
+	x, err := webfsim.DirGet(ctx, d.getStore(), d.m, name)
+	if err != nil {
+		return nil, err
+	}
+	if x == nil {
+		return nil, nil
+	}
+	return wrapObject(d, name, x.Object)
 }
 
 func (d *Dir) Put(ctx context.Context, ent webfsim.DirEntry) error {
@@ -175,7 +178,7 @@ func (d *Dir) Size() uint64 {
 }
 
 func (d *Dir) String() string {
-	return "Object{Dir}"
+	return "Dir{}"
 }
 
 func (d Dir) FileInfo() FileInfo {

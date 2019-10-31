@@ -2,35 +2,14 @@ package webfs
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"strings"
 
 	"github.com/brendoncarroll/webfs/pkg/webfsim"
 	"github.com/brendoncarroll/webfs/pkg/webref"
 )
 
-type Path []string
-
-func (p Path) String() string {
-	return "/" + strings.Join(p, "/")
-}
-
-func ParsePath(x string) Path {
-	y := []string{}
-	for _, part := range strings.Split(x, "/") {
-		switch part {
-		case "", ".":
-		default:
-			y = append(y, part)
-		}
-	}
-	return Path(y)
-}
-
 type Object interface {
-	Find(ctx context.Context, p Path, objs []Object) ([]Object, error)
-	Lookup(ctx context.Context, p Path) (Object, error)
+	GetAtPath(ctx context.Context, p Path, objs []Object) ([]Object, error)
 	Walk(ctx context.Context, f func(Object) bool) (bool, error)
 	Path() Path
 	Size() uint64
@@ -74,14 +53,6 @@ func (o *baseObject) getOptions() *Options {
 	return o.parent.getOptions()
 }
 
-func unmarshalObject(parent Object, name string, data []byte) (Object, error) {
-	m := webfsim.Object{}
-	if err := json.Unmarshal(data, &m); err != nil {
-		return nil, err
-	}
-	return wrapObject(parent, name, &m)
-}
-
 func wrapObject(parent Object, nameInParent string, o *webfsim.Object) (Object, error) {
 	base := baseObject{
 		parent:       parent,
@@ -91,18 +62,8 @@ func wrapObject(parent Object, nameInParent string, o *webfsim.Object) (Object, 
 
 	switch o2 := o.Value.(type) {
 	case *webfsim.Object_Volume:
-		v := &Volume{
-			spec:       o2.Volume,
-			baseObject: base,
-		}
-		as := &auxState{v: v}
-		wfs := parent.getFS()
-		cell, err := wfs.setupCell(o2.Volume, as)
-		if err != nil {
-			return nil, err
-		}
-		v.cell = cell
-		return v, nil
+		ctx := context.TODO()
+		return newVolume(ctx, o2.Volume, parent.getFS(), parent, nameInParent)
 
 	case *webfsim.Object_File:
 		return &File{

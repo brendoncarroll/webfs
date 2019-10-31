@@ -31,11 +31,41 @@ type Volume struct {
 	baseObject
 }
 
+func newVolume(ctx context.Context, spec *webfsim.VolumeSpec, fs *WebFS, parent Object, nameInParent string) (*Volume, error) {
+	v := &Volume{
+		spec: spec,
+		baseObject: baseObject{
+			fs:           fs,
+			parent:       parent,
+			nameInParent: nameInParent,
+		},
+	}
+	as := &auxState{v: v}
+	cell, err := fs.setupCell(spec, as)
+	if err != nil {
+		return nil, err
+	}
+	v.cell = cell
+
+	return v, v.init(ctx)
+}
+
+func newRootVolume(ctx context.Context, spec *webfsim.VolumeSpec, cell cells.Cell, fs *WebFS) (*Volume, error) {
+	v := &Volume{
+		spec: spec,
+		baseObject: baseObject{
+			fs: fs,
+		},
+		cell: cell,
+	}
+	return v, v.init(ctx)
+}
+
 func (v *Volume) ID() string {
 	return v.spec.Id
 }
 
-func (v *Volume) Find(ctx context.Context, p Path, objs []Object) ([]Object, error) {
+func (v *Volume) GetAtPath(ctx context.Context, p Path, objs []Object) ([]Object, error) {
 	if len(p) == 0 {
 		objs = append(objs, v)
 	}
@@ -45,7 +75,7 @@ func (v *Volume) Find(ctx context.Context, p Path, objs []Object) ([]Object, err
 		return nil, err
 	}
 	if o != nil {
-		objs, err = o.Find(ctx, p, objs)
+		objs, err = o.GetAtPath(ctx, p, objs)
 		if err != nil {
 			return nil, err
 		}
@@ -54,14 +84,14 @@ func (v *Volume) Find(ctx context.Context, p Path, objs []Object) ([]Object, err
 }
 
 func (v *Volume) Lookup(ctx context.Context, p Path) (Object, error) {
-	o, err := v.getObject(ctx)
+	objs, err := v.GetAtPath(ctx, p, nil)
 	if err != nil {
 		return nil, err
 	}
-	if o == nil {
+	if len(objs) < 1 {
 		return nil, nil
 	}
-	return o.Lookup(ctx, p)
+	return objs[len(objs)-1], nil
 }
 
 func (v *Volume) Walk(ctx context.Context, f func(Object) bool) (bool, error) {

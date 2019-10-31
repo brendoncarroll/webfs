@@ -28,7 +28,7 @@ func getTestFS() *WebFS {
 		panic(err)
 	}
 
-	objs, err := wfs.Find(ctx, "")
+	objs, err := wfs.GetAtPath(ctx, "")
 	if err != nil {
 		panic(err)
 	}
@@ -45,7 +45,7 @@ func TestFind(t *testing.T) {
 	err := wfs.Mkdir(ctx, "")
 	require.Nil(t, err)
 
-	objs, err := wfs.Find(ctx, "")
+	objs, err := wfs.GetAtPath(ctx, "")
 	require.Nil(t, err)
 	if assert.Len(t, objs, 2) {
 		_, ok := objs[1].(*Dir)

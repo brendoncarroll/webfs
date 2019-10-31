@@ -55,9 +55,10 @@ func (f *File) SetData(ctx context.Context, r io.Reader) error {
 	})
 }
 
-func (f *File) Find(ctx context.Context, p Path, objs []Object) ([]Object, error) {
+func (f *File) GetAtPath(ctx context.Context, p Path, objs []Object) ([]Object, error) {
 	if len(p) == 0 {
-		return []Object{f}, nil
+		objs = append(objs, f)
+		return objs, nil
 	}
 	return nil, errors.New("cannot lookup in file")
 }
@@ -109,7 +110,7 @@ func (f *File) Size() uint64 {
 }
 
 func (f File) String() string {
-	return "Object{File}"
+	return "File{}"
 }
 
 func (f File) FileInfo() FileInfo {

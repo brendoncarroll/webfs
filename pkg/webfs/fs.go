@@ -40,47 +40,43 @@ func New(rootCell Cell, baseStore stores.ReadPost) (*WebFS, error) {
 	wfs.cells.Store("", rootCell)
 	wfs.addCell(rootCell)
 
-	rv := &Volume{
-		spec: &webfsim.VolumeSpec{
+	v, err := newRootVolume(
+		context.TODO(),
+		&webfsim.VolumeSpec{
 			Id: RootVolumeID,
 		},
-		cell: rootCell,
-		baseObject: baseObject{
-			fs:           wfs,
-			parent:       nil,
-			nameInParent: "",
-		},
-	}
-	if err := rv.init(context.TODO()); err != nil {
+		rootCell,
+		wfs,
+	)
+	if err != nil {
 		return nil, err
 	}
-	wfs.root = rv
+	wfs.root = v
 
 	return wfs, nil
 }
 
-func (wfs *WebFS) Find(ctx context.Context, p string) ([]Object, error) {
-	return wfs.find(ctx, ParsePath(p))
+func (wfs *WebFS) GetAtPath(ctx context.Context, p string) ([]Object, error) {
+	return wfs.getAtPath(ctx, ParsePath(p))
 }
 
-func (wfs *WebFS) find(ctx context.Context, p Path) ([]Object, error) {
-	return wfs.root.Find(ctx, p, nil)
+func (wfs *WebFS) getAtPath(ctx context.Context, p Path) ([]Object, error) {
+	return wfs.root.GetAtPath(ctx, p, nil)
 }
 
 func (wfs *WebFS) Lookup(ctx context.Context, p string) (Object, error) {
-	p2 := ParsePath(p)
-	return wfs.lookup(ctx, p2)
+	return wfs.lookup(ctx, ParsePath(p))
 }
 
 func (wfs *WebFS) lookup(ctx context.Context, p Path) (Object, error) {
-	o, err := wfs.root.Lookup(ctx, p)
+	objs, err := wfs.getAtPath(ctx, p)
 	if err != nil {
 		return nil, err
 	}
-	if o == nil {
+	if len(objs) < 1 {
 		return nil, os.ErrNotExist
 	}
-	return o, nil
+	return objs[len(objs)-1], nil
 }
 
 func (wfs *WebFS) lookupParent(ctx context.Context, p Path) (Object, error) {
@@ -92,7 +88,7 @@ func (wfs *WebFS) lookupParent(ctx context.Context, p Path) (Object, error) {
 		parentPath = p[:last]
 	}
 
-	objs, err := wfs.find(ctx, parentPath)
+	objs, err := wfs.getAtPath(ctx, parentPath)
 	if err != nil {
 		return nil, err
 	}

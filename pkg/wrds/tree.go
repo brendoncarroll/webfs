@@ -117,7 +117,9 @@ func (t *Tree) put(ctx context.Context, s ReadPost, ent *TreeEntry) (*Tree, erro
 		entries = append(entries, ent)
 	}
 
-	entries = append(entries, t.Entries[i:]...)
+	if i < len(t.Entries) {
+		entries = append(entries, t.Entries[i+1:]...)
+	}
 	newTree := Tree{Level: t.Level, Entries: entries}
 	return &newTree, nil
 }

@@ -2,7 +2,11 @@ package httpcell
 
 import (
 	"context"
+	"fmt"
+	"math/rand"
 	"testing"
+
+	"github.com/brendoncarroll/webfs/pkg/cells"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -41,4 +45,25 @@ func TestHttpCell(t *testing.T) {
 		}
 		data = next
 	}
+}
+
+func TestSuite(t *testing.T) {
+	ctx := context.TODO()
+	ctx, cf := context.WithCancel(ctx)
+	defer cf()
+
+	const addr = "127.0.0.1:"
+	server := NewServer()
+	go server.Serve(ctx, addr)
+
+	cells.CellTestSuite(t, func() cells.Cell {
+		n := rand.Int()
+		name := fmt.Sprint("cell-", n)
+		server.newCell(name)
+
+		u := server.URL() + name
+		cell := New(Spec{URL: u})
+
+		return cell
+	})
 }

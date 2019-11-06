@@ -32,7 +32,7 @@ func getTestFS() *WebFS {
 	if err != nil {
 		panic(err)
 	}
-	objs[0].(*Volume).ChangeOptions(ctx, func(x *Options) *Options {
+	objs[0].(*Volume).ApplyOptions(ctx, func(x *Options) *Options {
 		x.DataOpts.Replicas[""] = 1
 		return x
 	})
@@ -113,6 +113,18 @@ func TestNewVolume(t *testing.T) {
 	defer cf()
 	mc := memcell.New()
 	ms := stores.NewMemStore(4096)
+	// setup webfs
+	wfs, err := New(mc, ms)
+	require.Nil(t, err)
+	rootV, err := wfs.GetVolume(ctx, RootVolumeID)
+	require.Nil(t, err)
+	err = rootV.ApplyOptions(ctx, func(x *Options) *Options {
+		x.DataOpts.Replicas[""] = 1
+		return x
+	})
+	require.Nil(t, err)
+
+	// setup cell server, and client
 	cellServer := httpcell.NewServer()
 	cellName := "cell1"
 
@@ -121,19 +133,9 @@ func TestNewVolume(t *testing.T) {
 			t.Log(err)
 		}
 	}()
-
 	spec := cellServer.CreateCell(cellName)
 
-	wfs, err := New(mc, ms)
-	require.Nil(t, err)
-	vol, err := wfs.GetVolume(ctx, RootVolumeID)
-	require.Nil(t, err)
-	err = vol.ChangeOptions(ctx, func(x *Options) *Options {
-		x.DataOpts.Replicas[""] = 1
-		return x
-	})
-	require.Nil(t, err)
-
+	// create volume
 	p := "/testvol"
 	vs := webfsim.VolumeSpec{
 		CellSpec: &webfsim.CellSpec{
@@ -146,11 +148,13 @@ func TestNewVolume(t *testing.T) {
 	}
 	err = wfs.Mkdir(ctx, "")
 	require.Nil(t, err)
-	volID, err := wfs.NewVolume(ctx, p, vs)
+	vol, err := wfs.NewVolume(ctx, p)
 	require.Nil(t, err)
-	vol, err = wfs.GetVolume(ctx, volID)
+	err = vol.ApplySpec(ctx, func(x webfsim.VolumeSpec) webfsim.VolumeSpec {
+		return vs
+	})
 	require.Nil(t, err)
-	err = vol.ChangeOptions(ctx, func(x *Options) *Options {
+	err = vol.ApplyOptions(ctx, func(x *Options) *Options {
 		x.DataOpts.Replicas[""] = 1
 		return x
 	})
@@ -211,4 +215,12 @@ func TestLookupParent(t *testing.T) {
 		t.Error("did not find root dir")
 	}
 	require.Equal(t, p, name)
+
+	v1, err := wfs.NewVolume(ctx, "vol1")
+	require.Nil(t, err)
+
+	o, name, err = wfs.lookupParent(ctx, ParsePath("vol1"))
+	require.Nil(t, err)
+	assert.Equal(t, v1.Describe(), o.Describe())
+	assert.Equal(t, name, "")
 }

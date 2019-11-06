@@ -3,6 +3,7 @@ package webref
 import (
 	"context"
 
+	"github.com/golang/protobuf/proto"
 	lru "github.com/hashicorp/golang-lru"
 	"golang.org/x/crypto/sha3"
 )
@@ -45,7 +46,7 @@ func (c *Cache) Get(ctx context.Context, ref *Ref) ([]byte, error) {
 }
 
 func refKey(r *Ref) [32]byte {
-	data, err := r.XXX_Marshal(nil, true)
+	data, err := proto.Marshal(r)
 	if err != nil {
 		panic(err)
 	}

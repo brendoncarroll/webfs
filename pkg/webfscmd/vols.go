@@ -1,26 +1,23 @@
 package webfscmd
 
 import (
-	"errors"
-	"io/ioutil"
-
-	"github.com/brendoncarroll/webfs/pkg/webfsim"
-	"github.com/brendoncarroll/webfs/pkg/webref"
 	"github.com/spf13/cobra"
 )
 
 func init() {
 	newVol.Flags().String("path", "", "--path=/mypath")
-	newVol.Flags().StringP("file", "f", "", "-f")
 	newCmd.AddCommand(newVol)
 }
 
 var newVol = &cobra.Command{
-	Use: "volume",
+	Use:     "volume",
+	Aliases: []string{"vol"},
+
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := setupWfs(); err != nil {
 			return err
 		}
+
 		if err := cmd.ParseFlags(args); err != nil {
 			return err
 		}
@@ -28,29 +25,13 @@ var newVol = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		specFilePath, err := cmd.Flags().GetString("file")
+
+		vol, err := wfs.NewVolume(ctx, path)
 		if err != nil {
 			return err
-		}
-		if specFilePath == "" {
-			return errors.New("no filepath provided")
 		}
 
-		data, err := ioutil.ReadFile(specFilePath)
-		if err != nil {
-			return err
-		}
-		spec := webfsim.VolumeSpec{}
-
-		if err := webref.Decode(webref.CodecJSON, data, &spec); err != nil {
-			return err
-		}
-		volID, err := wfs.NewVolume(ctx, path, spec)
-		if err != nil {
-			return err
-		}
-		cmd.Println(volID)
+		cmd.Println(vol.ID())
 		return nil
 	},
-	Aliases: []string{"vol"},
 }

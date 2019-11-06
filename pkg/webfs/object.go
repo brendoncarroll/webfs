@@ -9,17 +9,20 @@ import (
 )
 
 type Object interface {
-	GetAtPath(ctx context.Context, p Path, objs []Object) ([]Object, error)
+	GetAtPath(ctx context.Context, p Path, objs []Object, max int) ([]Object, error)
 	Walk(ctx context.Context, f func(Object) bool) (bool, error)
+	RefIter(ctx context.Context, f func(webref.Ref) bool) (bool, error)
+
 	Path() Path
 	Size() uint64
 	String() string
-	RefIter(ctx context.Context, f func(webref.Ref) bool) (bool, error)
+	Describe() string
 
 	getFS() *WebFS
 	getStore() *Store
 	getOptions() *Options
 	getParent() Object
+	getName() string
 }
 
 type baseObject struct {
@@ -35,6 +38,10 @@ func (o *baseObject) Path() Path {
 		p = append(p, o.nameInParent)
 	}
 	return p
+}
+
+func (o *baseObject) getName() string {
+	return o.nameInParent
 }
 
 func (o *baseObject) getParent() Object {
@@ -82,28 +89,40 @@ func wrapObject(parent Object, nameInParent string, o *webfsim.Object) (Object, 
 	}
 }
 
-func putAt(ctx context.Context, parent Object, o *webfsim.Object, name string) error {
-	var put func(context.Context, ObjectMutator) error
+func apply(ctx context.Context, parent Object, name string, f ObjectMutator) error {
 	switch x := parent.(type) {
 	case *Volume:
 		if name != "" {
 			return errors.New("volumes do not support entries")
 		}
-		put = x.put
+		return x.ApplyObject(ctx, f)
 	case *Dir:
-		put = func(ctx context.Context, fn ObjectMutator) error {
-			return x.put(ctx, name, fn)
-		}
+		return x.ApplyEntry(ctx, name, f)
 	default:
-		panic("lookup returned file")
+		panic("can't apply")
 	}
-	err := put(ctx, func(cur *webfsim.Object) (*webfsim.Object, error) {
-		if cur != nil {
-			return nil, errors.New("object already here")
-		}
+}
+
+func putAt(ctx context.Context, parent Object, name string, o *webfsim.Object) error {
+	return apply(ctx, parent, name, func(x *webfsim.Object) (*webfsim.Object, error) {
 		return o, nil
 	})
-	return err
+}
+
+func deleteAt(ctx context.Context, parent Object, name string) error {
+	switch x := parent.(type) {
+	case *Volume:
+		if name != "" {
+			return errors.New("volumes do not support entries")
+		}
+		return x.ApplyObject(ctx, func(x *webfsim.Object) (*webfsim.Object, error) {
+			return nil, nil
+		})
+	case *Dir:
+		return x.Delete(ctx, name)
+	default:
+		panic("can't delete")
+	}
 }
 
 func containingVolume(o Object) *Volume {

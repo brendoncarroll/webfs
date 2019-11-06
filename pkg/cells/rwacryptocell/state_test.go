@@ -11,25 +11,25 @@ func TestInit(t *testing.T) {
 	privEnt, err := GenerateEntity()
 	require.Nil(t, err)
 
-	cc := &CellContents{}
+	cc := &CellState{}
 	cc, err = AddEntity(cc, privEnt, GetPublicEntity(privEnt))
 	require.Nil(t, err)
 	cc, err = AddAdmin(cc, privEnt, GetPublicEntity(privEnt))
 	require.Nil(t, err)
 
-	initWho := &Who{
+	initACL := &ACL{
 		Entities: []*Entity{GetPublicEntity(privEnt)},
 		Admin:    []int32{0},
 		Write:    nil,
 		Read:     nil,
 	}
-	errs := ValidateContents(initWho, cc)
+	errs := ValidateState(initACL, cc)
 	assert.Len(t, errs, 0)
 
 	rando, err := GenerateEntity()
 	require.Nil(t, err)
-	cc.Who.Entities = append(cc.Who.Entities, GetPublicEntity(rando))
+	cc.Acl.Entities = append(cc.Acl.Entities, GetPublicEntity(rando))
 
-	errs = ValidateContents(initWho, cc)
+	errs = ValidateState(initACL, cc)
 	assert.NotEmpty(t, errs)
 }

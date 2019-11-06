@@ -40,6 +40,8 @@ message VolumeSpec {
 message Commit {
     webref.Ref object_ref = 1;
     Options options = 2;
+    uint64 gen = 3;
+    webref.Ref previous = 4;
 }
 
 // Volume Options
@@ -57,13 +59,4 @@ message WriteOptions {
 
     map<string, int32> replicas = 4;
     string codec = 5;
-}
-
-message StoreSpec {
-    string prefix = 1;
-
-    oneof spec {
-        HTTPStoreSpec http = 2;
-        IPFSStoreSpec ipfs = 3;
-    }
 }

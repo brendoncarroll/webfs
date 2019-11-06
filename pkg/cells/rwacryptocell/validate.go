@@ -4,37 +4,45 @@ import (
 	"errors"
 	fmt "fmt"
 	"sort"
+
+	proto "github.com/golang/protobuf/proto"
 )
 
-func ValidateContents(who *Who, next *CellContents) []error {
+func ValidateState(acl *ACL, next *CellState) []error {
 	var errs []error
 
-	if who == nil {
+	if acl == nil {
 		return nil
 	}
-	errs2 := ValidateWho(who, next.Who, next.WhoSigs)
+	errs2 := ValidateACL(acl, next.Acl, next.AclSigs)
 	errs = append(errs, errs2...)
 
-	errs2 = ValidateWhat(next.Who, next.What, next.WhatAuthor, next.WhatSig)
+	errs2 = ValidateWhat(next.Acl, next.What, next.WhatAuthor, next.WhatSig)
 	errs = append(errs, errs2...)
 
 	return errs
 }
 
-func ValidateWhat(who *Who, what *What, signerIndex int32, sig *Sig) []error {
+func ValidateWhat(acl *ACL, what *What, signerIndex int32, sig *Sig) []error {
 	var errs []error
 
-	if !int32Contains(who.Write, signerIndex) {
+	if acl == nil {
+		err := errors.New("missing acl")
+		errs = append(errs, err)
+		return errs
+	}
+
+	if !int32Contains(acl.Write, signerIndex) {
 		err := fmt.Errorf("author does not have write permission")
 		errs = append(errs, err)
 	}
 
-	author := who.Entities[int(signerIndex)]
+	author := acl.Entities[int(signerIndex)]
 
 	if what == nil {
 		what = &What{}
 	}
-	whatBytes, err := what.XXX_Marshal(nil, true)
+	whatBytes, err := proto.Marshal(what)
 	if err != nil {
 		panic(err)
 	}
@@ -46,12 +54,17 @@ func ValidateWhat(who *Who, what *What, signerIndex int32, sig *Sig) []error {
 	return nil
 }
 
-func ValidateWho(prev, next *Who, sigs map[int32]*Sig) []error {
+func ValidateACL(prev, next *ACL, sigs map[int32]*Sig) []error {
 	var errs []error
 	if next == nil {
-		err := errors.New("nil who")
+		err := errors.New("nil acl")
 		errs = append(errs, err)
 		return errs
+	}
+
+	aclBytes, err := proto.Marshal(next)
+	if err != nil {
+		panic(err)
 	}
 
 	admins := prev.Admin
@@ -59,16 +72,11 @@ func ValidateWho(prev, next *Who, sigs map[int32]*Sig) []error {
 		return admins[i] < admins[j]
 	})
 
-	whoBytes, err := next.XXX_Marshal(nil, true)
-	if err != nil {
-		panic(err)
-	}
-
-	// must find an admin who signed off on it
+	// must find an admin acl signed off on it
 	for i, sig := range sigs {
 		if int32Contains(admins, i) {
 			signer := prev.Entities[i].SigningKey
-			if err := VerifySig(whoBytes, signer, sig); err != nil {
+			if err := VerifySig(aclBytes, signer, sig); err != nil {
 				errs = append(errs, err)
 			}
 			return errs

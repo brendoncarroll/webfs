@@ -6,25 +6,20 @@ import (
 	fmt "fmt"
 	"hash"
 
+	"golang.org/x/crypto/sha3"
+
 	"golang.org/x/crypto/ed25519"
 )
 
 func VerifySig(data []byte, signer *Key, sig *Sig) error {
 	var (
-		h        hash.Hash
 		verified bool
 	)
 	if sig == nil {
 		return errors.New("nil Sig is not a valid Sig")
 	}
 
-	switch sig.HashFunc {
-	case HashFunc_SHA256:
-		h = sha256.New()
-	default:
-		return fmt.Errorf("hash function not supported: %v", sig.HashFunc)
-	}
-	digest := h.Sum(data)
+	digest := digestOf(sig.HashFunc, data)
 
 	switch sig.Algo {
 	case SigAlgo_ED25519:
@@ -48,16 +43,11 @@ func VerifySig(data []byte, signer *Key, sig *Sig) error {
 func Sign(data []byte, signer *Key) (*Sig, error) {
 	var (
 		algo     = SigAlgo_ED25519
-		hashFunc = HashFunc_SHA256
-		h        hash.Hash
+		hashFunc = HashFunc_SHA3_256
 		sigBytes []byte
 	)
 
-	switch hashFunc {
-	case HashFunc_SHA256:
-		h = sha256.New()
-	}
-	digest := h.Sum(data)
+	digest := digestOf(hashFunc, data)
 
 	switch algo {
 	case SigAlgo_ED25519:
@@ -73,4 +63,20 @@ func Sign(data []byte, signer *Key) (*Sig, error) {
 		Sig:      sigBytes,
 	}
 	return sig, nil
+}
+
+func digestOf(hashFunc HashFunc, data []byte) []byte {
+	var h hash.Hash
+	switch hashFunc {
+	case HashFunc_SHA3_256:
+		h = sha3.New256()
+	case HashFunc_SHA256:
+		h = sha256.New()
+	}
+	_, err := h.Write(data)
+	if err != nil {
+		panic(err)
+	}
+	digest := h.Sum(nil)
+	return digest
 }

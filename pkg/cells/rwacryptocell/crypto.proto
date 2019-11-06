@@ -21,6 +21,7 @@ enum HashFunc {
     // might as well use a number at least someone else is using
     // https://github.com/multiformats/multicodec/blob/master/table.csv
     SHA256 = 18;
+    SHA3_256 = 22;
 }
 
 enum SigAlgo {

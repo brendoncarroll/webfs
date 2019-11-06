@@ -35,11 +35,14 @@ var lsCmd = &cobra.Command{
 		for _, e := range entries {
 			oStr := ""
 			if v, ok := e.Object.(*webfs.Volume); ok {
-				o, err := v.Lookup(ctx, nil)
+				objs, err := v.GetAtPath(ctx, nil, nil, -1)
 				if err != nil {
-					return err
+					oStr = fmt.Sprint(v, "(broken)", err)
+				} else if len(objs) > 1 {
+					oStr = fmt.Sprint(v, "->", objs[1])
+				} else {
+					oStr = fmt.Sprint(v, "->", "empty")
 				}
-				oStr = fmt.Sprint(v, " -> ", o)
 			} else {
 				oStr = fmt.Sprint(e.Object)
 			}

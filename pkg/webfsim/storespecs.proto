@@ -3,6 +3,15 @@ syntax = "proto3";
 package webfs;
 option go_package = "webfsim";
 
+message StoreSpec {
+    string prefix = 1;
+
+    oneof spec {
+        HTTPStoreSpec http = 2;
+        IPFSStoreSpec ipfs = 3;
+    }
+}
+
 message HTTPStoreSpec {
     string prefix = 1;
     string endpoint = 2;

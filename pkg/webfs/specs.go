@@ -68,16 +68,17 @@ func model2Cell(x *webfsim.CellSpec, as *auxState) (cells.Cell, error) {
 		cell = httpcell.New(spec)
 
 	case *webfsim.CellSpec_Rwacrypto:
-		innerCell, err := model2Cell(x2.Rwacrypto.Inner, as)
+		innerCell, err := model2Cell(x2.Rwacrypto.Inner, nil)
 		if err != nil {
 			return nil, err
 		}
 		spec := rwacryptocell.Spec{
 			Inner:         innerCell,
+			AuxState:      as,
 			PrivateEntity: x2.Rwacrypto.PrivateEntity,
 			PublicEntity:  x2.Rwacrypto.PublicEntity,
 		}
-		cell = rwacryptocell.New(spec, as)
+		cell = rwacryptocell.New(spec)
 
 	case *webfsim.CellSpec_Secretbox:
 		innerCell, err := model2Cell(x2.Secretbox.Inner, as)
@@ -92,6 +93,5 @@ func model2Cell(x *webfsim.CellSpec, as *auxState) (cells.Cell, error) {
 	default:
 		return nil, fmt.Errorf("unrecognized cell spec. type=%T", x)
 	}
-
 	return cell, nil
 }

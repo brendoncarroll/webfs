@@ -110,3 +110,21 @@ func TestDelete(t *testing.T) {
 		require.Nil(t, ent)
 	}
 }
+
+func TestReplace(t *testing.T) {
+	s := webref.NewMemStore(4096)
+	tree := NewTree()
+
+	const N = 10
+	key := []byte("key")
+	for i := 0; i < N; i++ {
+		u := fmt.Sprint("url", i)
+		ref := &webref.Ref{Ref: &webref.Ref_Url{u}}
+		tree2, err := tree.Put(ctx, s, []byte(key), ref)
+		require.Nil(t, err)
+
+		assert.Len(t, tree2.Entries, 1)
+
+		tree = tree2
+	}
+}

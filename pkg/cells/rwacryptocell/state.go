@@ -4,21 +4,24 @@ import (
 	"errors"
 	fmt "fmt"
 	"log"
-	"sort"
 
 	"github.com/golang/protobuf/proto"
 )
 
-func GetPayload(c *CellContents, privEnt *Entity) ([]byte, error) {
-	if c.Who == nil {
-		return nil, errors.New("nil who")
+func GetPayload(c *CellState, privEnt *Entity) ([]byte, error) {
+	if c.Acl == nil {
+		return nil, errors.New("nil acl")
 	}
-	i := findEntity(c.Who.Entities, GetPublicEntity(privEnt))
-	ri := int32findI(c.Who.Read, int32(i))
+	i := findEntity(c.Acl.Entities, GetPublicEntity(privEnt))
+	ri := int32findI(c.Acl.Read, int32(i))
 	if ri == -1 {
 		return nil, errors.New("entity is not a reader")
 	}
 
+	if ri >= len(c.What.Deks) {
+		log.Println("INFO: given read access after last write. returning nil")
+		return nil, nil
+	}
 	dekMsg := c.What.Deks[ri]
 	secretKey, err := AsymDecrypt(privEnt.EncryptionKey, dekMsg)
 	if err != nil {
@@ -27,7 +30,7 @@ func GetPayload(c *CellContents, privEnt *Entity) ([]byte, error) {
 	return SymDecrypt(c.What.Payload, secretKey)
 }
 
-func PutPayload(prev *CellContents, privEntity *Entity, data []byte) (*CellContents, error) {
+func PutPayload(prev *CellState, privEntity *Entity, data []byte) (*CellState, error) {
 	what, err := createWhat(prev, privEntity.GetSigningKey(), data)
 	if err != nil {
 		return nil, err
@@ -36,12 +39,12 @@ func PutPayload(prev *CellContents, privEntity *Entity, data []byte) (*CellConte
 	if err != nil {
 		return nil, err
 	}
-	whatAuthor := findEntity(prev.Who.Entities, GetPublicEntity(privEntity))
+	whatAuthor := findEntity(prev.Acl.Entities, GetPublicEntity(privEntity))
 
-	return &CellContents{
-		Who:       prev.Who,
-		WhoAuthor: prev.WhoAuthor,
-		WhoSigs:   prev.WhoSigs,
+	return &CellState{
+		Acl:       prev.Acl,
+		AclAuthor: prev.AclAuthor,
+		AclSigs:   prev.AclSigs,
 
 		What:       what,
 		WhatAuthor: int32(whatAuthor),
@@ -49,9 +52,9 @@ func PutPayload(prev *CellContents, privEntity *Entity, data []byte) (*CellConte
 	}, nil
 }
 
-func AddReader(prev *CellContents, privEnt, readEnt *Entity) (*CellContents, error) {
-	contents := proto.Clone(prev).(*CellContents)
-	err := updateWho(contents, privEnt, func(x *Who) (*Who, error) {
+func AddReader(prev *CellState, privEnt, readEnt *Entity) (*CellState, error) {
+	contents := proto.Clone(prev).(*CellState)
+	err := updateACL(contents, privEnt, func(x *ACL) (*ACL, error) {
 		i := findEntity(x.Entities, readEnt)
 		if i < 0 {
 			return nil, fmt.Errorf("entity not found")
@@ -62,9 +65,9 @@ func AddReader(prev *CellContents, privEnt, readEnt *Entity) (*CellContents, err
 	return contents, err
 }
 
-func AddWriter(prev *CellContents, privEnt, writeEnt *Entity) (*CellContents, error) {
-	contents := proto.Clone(prev).(*CellContents)
-	err := updateWho(contents, privEnt, func(x *Who) (*Who, error) {
+func AddWriter(prev *CellState, privEnt, writeEnt *Entity) (*CellState, error) {
+	contents := proto.Clone(prev).(*CellState)
+	err := updateACL(contents, privEnt, func(x *ACL) (*ACL, error) {
 		i := findEntity(x.Entities, writeEnt)
 		if i < 0 {
 			return nil, fmt.Errorf("entity not found")
@@ -75,9 +78,9 @@ func AddWriter(prev *CellContents, privEnt, writeEnt *Entity) (*CellContents, er
 	return contents, err
 }
 
-func AddAdmin(prev *CellContents, privEnt, adminEnt *Entity) (*CellContents, error) {
-	contents := proto.Clone(prev).(*CellContents)
-	err := updateWho(contents, privEnt, func(x *Who) (*Who, error) {
+func AddAdmin(prev *CellState, privEnt, adminEnt *Entity) (*CellState, error) {
+	contents := proto.Clone(prev).(*CellState)
+	err := updateACL(contents, privEnt, func(x *ACL) (*ACL, error) {
 		adminI := findEntity(x.Entities, adminEnt)
 		if adminI < 0 {
 			return nil, fmt.Errorf("entity not found")
@@ -88,9 +91,9 @@ func AddAdmin(prev *CellContents, privEnt, adminEnt *Entity) (*CellContents, err
 	return contents, err
 }
 
-func AddEntity(prev *CellContents, privEnt, newEnt *Entity) (*CellContents, error) {
-	contents := proto.Clone(prev).(*CellContents)
-	err := updateWho(contents, privEnt, func(x *Who) (*Who, error) {
+func AddEntity(prev *CellState, privEnt, newEnt *Entity) (*CellState, error) {
+	contents := proto.Clone(prev).(*CellState)
+	err := updateACL(contents, privEnt, func(x *ACL) (*ACL, error) {
 		i := findEntity(x.Entities, newEnt)
 		if i != -1 {
 			return nil, errors.New("entity already exists")
@@ -101,45 +104,44 @@ func AddEntity(prev *CellContents, privEnt, newEnt *Entity) (*CellContents, erro
 	return contents, err
 }
 
-func updateWho(cc *CellContents, privEnt *Entity, fn func(*Who) (*Who, error)) error {
-	x := cc.Who
+func updateACL(cc *CellState, privEnt *Entity, fn func(*ACL) (*ACL, error)) error {
+	x := cc.Acl
 	if x == nil {
-		x = &Who{}
+		x = &ACL{}
 	}
 	y, err := fn(x)
 	if err != nil {
 		return err
 	}
-	cc.Who = y
+	cc.Acl = y
 
-	cc.WhoAuthor, cc.WhoSigs, err = signWho(privEnt, y)
+	var sig *Sig
+	cc.AclAuthor, sig, err = signACL(privEnt, y)
 	if err != nil {
 		return err
 	}
+	cc.AclSigs = map[int32]*Sig{cc.AclAuthor: sig}
 
 	return nil
 }
 
-func signWho(privEnt *Entity, who *Who) (int32, map[int32]*Sig, error) {
-	author := int32(findEntity(who.Entities, GetPublicEntity(privEnt)))
+func signACL(privEnt *Entity, acl *ACL) (int32, *Sig, error) {
+	author := int32(findEntity(acl.Entities, GetPublicEntity(privEnt)))
 	if author < 0 {
 		return -1, nil, fmt.Errorf("signing entity not found")
 	}
-	whoBytes, err := who.XXX_Marshal(nil, true)
+	aclBytes, err := proto.Marshal(acl)
 	if err != nil {
 		return -1, nil, err
 	}
-	sig, err := Sign(whoBytes, privEnt.SigningKey)
+	sig, err := Sign(aclBytes, privEnt.SigningKey)
 	if err != nil {
 		return -1, nil, err
 	}
-	sigs := map[int32]*Sig{
-		author: sig,
-	}
-	return author, sigs, nil
+	return author, sig, nil
 }
 
-func createWhat(prev *CellContents, signer *Key, data []byte) (*What, error) {
+func createWhat(prev *CellState, signer *Key, data []byte) (*What, error) {
 	prevWhat := prev.What
 	if prevWhat == nil {
 		prevWhat = &What{}
@@ -151,9 +153,9 @@ func createWhat(prev *CellContents, signer *Key, data []byte) (*What, error) {
 		return nil, err
 	}
 
-	deks := make([]*AsymEncMsg, len(prev.Who.Read))
-	for i, entityID := range prev.Who.Read {
-		entity := prev.Who.Entities[entityID]
+	deks := make([]*AsymEncMsg, len(prev.Acl.Read))
+	for i, entityID := range prev.Acl.Read {
+		entity := prev.Acl.Entities[entityID]
 		deks[i], err = AsymEncrypt(secretKey, entity.EncryptionKey)
 		if err != nil {
 			log.Println("error encrypting for", entity, err)
@@ -171,11 +173,10 @@ func createWhat(prev *CellContents, signer *Key, data []byte) (*What, error) {
 }
 
 func int32findI(s []int32, x int32) int {
-	n := sort.Search(len(s), func(i int) bool {
-		return x >= s[i]
-	})
-	if n < len(s) {
-		return n
+	for i := range s {
+		if s[i] == x {
+			return i
+		}
 	}
 	return -1
 }

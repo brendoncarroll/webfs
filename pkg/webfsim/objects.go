@@ -8,14 +8,13 @@ import (
 
 type Snapshot struct {
 	Volume    VolumeSpec `json:"volume"`
-	Commit    Commit     `json:"contents"`
+	Commit    Commit     `json:"commit"`
 	Timestamp time.Time  `json:"timestamp"`
 }
 
 func ObjectSplit(ctx context.Context, s ReadPost, o Object) (*Object, error) {
-	var (
-		o2 *Object
-	)
+	var o2 *Object
+
 	switch x := o.Value.(type) {
 	case *Object_Dir:
 		d2, err := DirSplit(ctx, s, *x.Dir)

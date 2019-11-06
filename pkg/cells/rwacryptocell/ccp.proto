@@ -6,17 +6,17 @@ option go_package = "github.com/brendoncarroll/webfs/pkg/cells/rwacryptocell";
 
 import "crypto.proto";
 
-message CellContents {
-    Who who = 1;
-    int32 who_author = 2;
-    map<int32, Sig> who_sigs = 3;
+message CellState {
+    ACL acl = 1;
+    int32 acl_author = 2;
+    map<int32, Sig> acl_sigs = 3;
 
     What what = 4;
     int32 what_author = 5;
     Sig what_sig = 6;
 }
 
-message Who {
+message ACL {
     repeated Entity entities = 1;
 
     repeated int32 admin = 2;
@@ -30,4 +30,8 @@ message What {
     EncMsg payload = 1;
     repeated AsymEncMsg deks = 2;
     int64 gen = 3;
+}
+
+message LocalState {
+    ACL acl = 1;
 }

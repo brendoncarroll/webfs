@@ -10,6 +10,7 @@ import (
 	"github.com/brendoncarroll/webfs/pkg/webfsim"
 	"github.com/brendoncarroll/webfs/pkg/webref"
 	"github.com/brendoncarroll/webfs/pkg/wrds"
+	"github.com/golang/protobuf/jsonpb"
 )
 
 type FileMutator func(cur webfsim.File) (*webfsim.File, error)
@@ -59,7 +60,7 @@ func (f *File) SetData(ctx context.Context, r io.Reader) error {
 	})
 }
 
-func (f *File) GetAtPath(ctx context.Context, p Path, objs []Object) ([]Object, error) {
+func (f *File) GetAtPath(ctx context.Context, p Path, objs []Object, n int) ([]Object, error) {
 	if len(p) == 0 {
 		objs = append(objs, f)
 		return objs, nil
@@ -117,6 +118,20 @@ func (f File) String() string {
 	return "File{}"
 }
 
+func (f File) Describe() string {
+	m := jsonpb.Marshaler{
+		Indent: " ",
+	}
+	o := &webfsim.Object{
+		Value: &webfsim.Object_File{&f.m},
+	}
+	s, err := m.MarshalToString(o)
+	if err != nil {
+		panic(err)
+	}
+	return s
+}
+
 func (f File) FileInfo() FileInfo {
 	t := time.Now().AddDate(0, 0, -1)
 	return FileInfo{
@@ -144,31 +159,25 @@ func (f *File) Apply(ctx context.Context, fn FileMutator) error {
 		err     error
 	)
 
-	switch x := f.parent.(type) {
-	case *Dir:
-		err = x.put(ctx, f.nameInParent, func(cur *webfsim.Object) (*webfsim.Object, error) {
-			curFile := f.m
-			if cur != nil {
-				of, ok := cur.Value.(*webfsim.Object_File)
-				if ok {
-					curFile = *of.File
-				}
+	err = apply(ctx, f.parent, f.nameInParent, func(cur *webfsim.Object) (*webfsim.Object, error) {
+		curFile := f.m
+		if cur != nil {
+			of, ok := cur.Value.(*webfsim.Object_File)
+			if ok {
+				curFile = *of.File
 			}
+		}
 
-			newFile, err = fn(curFile)
-			if err != nil {
-				return nil, err
-			}
-			return &webfsim.Object{
-				Value: &webfsim.Object_File{
-					File: newFile,
-				},
-			}, nil
-		})
-	default:
-		panic("invalid parent of file")
-	}
-
+		newFile, err = fn(curFile)
+		if err != nil {
+			return nil, err
+		}
+		return &webfsim.Object{
+			Value: &webfsim.Object_File{
+				File: newFile,
+			},
+		}, nil
+	})
 	if err != nil {
 		return err
 	}

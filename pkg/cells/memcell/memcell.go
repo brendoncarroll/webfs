@@ -31,7 +31,9 @@ func (c *Cell) CAS(ctx context.Context, cur, next []byte) (bool, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if bytes.Compare(c.x, cur) == 0 {
-		c.x = next
+		next2 := make([]byte, len(next))
+		copy(next2, next)
+		c.x = next2
 		return true, nil
 	}
 	return false, nil
@@ -40,6 +42,8 @@ func (c *Cell) CAS(ctx context.Context, cur, next []byte) (bool, error) {
 func (c *Cell) Get(ctx context.Context) ([]byte, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	data := make([]byte, len(c.x))
+	copy(data, c.x)
 	return c.x, nil
 }
 

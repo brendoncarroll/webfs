@@ -11,8 +11,6 @@ import (
 	"path"
 	"sync"
 
-	"github.com/brendoncarroll/webfs/pkg/cells"
-	"github.com/brendoncarroll/webfs/pkg/cells/httpcell"
 	"github.com/brendoncarroll/webfs/pkg/stores"
 	"github.com/brendoncarroll/webfs/pkg/webfsim"
 	"github.com/brendoncarroll/webfs/pkg/webref"
@@ -51,11 +49,11 @@ func New(rootCell Cell, baseStore stores.ReadPost) (*WebFS, error) {
 }
 
 func (wfs *WebFS) GetAtPath(ctx context.Context, p string) ([]Object, error) {
-	return wfs.getAtPath(ctx, ParsePath(p))
+	return wfs.getAtPath(ctx, ParsePath(p), -1)
 }
 
-func (wfs *WebFS) getAtPath(ctx context.Context, p Path) ([]Object, error) {
-	return wfs.root.GetAtPath(ctx, p, nil)
+func (wfs *WebFS) getAtPath(ctx context.Context, p Path, max int) ([]Object, error) {
+	return wfs.root.GetAtPath(ctx, p, nil, max)
 }
 
 func (wfs *WebFS) Lookup(ctx context.Context, p string) (Object, error) {
@@ -63,7 +61,7 @@ func (wfs *WebFS) Lookup(ctx context.Context, p string) (Object, error) {
 }
 
 func (wfs *WebFS) lookup(ctx context.Context, p Path) (Object, error) {
-	objs, err := wfs.getAtPath(ctx, p)
+	objs, err := wfs.getAtPath(ctx, p, -1)
 	if err != nil {
 		return nil, err
 	}
@@ -81,8 +79,7 @@ func (wfs *WebFS) lookupParent(ctx context.Context, p Path) (Object, string, err
 		name = p[last]
 		parentPath = p[:last]
 	}
-
-	objs, err := wfs.getAtPath(ctx, parentPath)
+	objs, err := wfs.getAtPath(ctx, parentPath, -1)
 	if err != nil {
 		return nil, "", err
 	}
@@ -95,9 +92,13 @@ func (wfs *WebFS) lookupParent(ctx context.Context, p Path) (Object, string, err
 	if !ok {
 		return o, name, nil
 	}
+
 	// check to see if there is a volume at that name
-	o2, err := dir.Lookup(ctx, Path{name})
+	o2, err := dir.Get(ctx, name)
 	if err != nil {
+		return nil, "", err
+	}
+	if o2 == nil {
 		return o, name, nil
 	}
 	if v, ok := o2.(*Volume); ok {
@@ -145,6 +146,18 @@ func (wfs *WebFS) Mkdir(ctx context.Context, p string) error {
 		return err
 	}
 	return err
+}
+
+func (wfs *WebFS) Touch(ctx context.Context, p string) (*File, error) {
+	parent, name, err := wfs.lookupParent(ctx, ParsePath(p))
+	if err != nil {
+		return nil, err
+	}
+	f, err := newFile(ctx, parent, name)
+	if err != nil {
+		return nil, err
+	}
+	return f, nil
 }
 
 func (wfs *WebFS) Cat(ctx context.Context, p string) (io.ReadCloser, error) {
@@ -232,33 +245,42 @@ func (wfs *WebFS) RefIter(ctx context.Context, f func(ref webref.Ref) bool) erro
 	return topErr
 }
 
-func (wfs *WebFS) NewVolume(ctx context.Context, p string, spec webfsim.VolumeSpec) (string, error) {
-	if spec.Id == "" {
-		spec.Id = generateVolId()
-	}
-	var cell cells.Cell
-	switch x := spec.CellSpec.Spec.(type) {
-	case *webfsim.CellSpec_Http:
-		spec2 := httpcell.Spec{
-			URL:     x.Http.Url,
-			Headers: x.Http.Headers,
-		}
-		cell = httpcell.New(spec2)
-	}
-	if cell == nil {
-		return "", errors.New("could not create cell")
-	}
-	_, err := cell.Get(ctx)
+func (wfs *WebFS) NewVolume(ctx context.Context, p string) (*Volume, error) {
+	parent, name, err := wfs.lookupParent(ctx, ParsePath(p))
 	if err != nil {
-		return "", errors.New("could not access cell")
+		return nil, err
 	}
 
-	v := webfsim.Object{
-		Value: &webfsim.Object_Volume{
-			Volume: &spec,
-		},
+	v, err := NewVolume(ctx, parent, name)
+	if err != nil {
+		return nil, err
 	}
-	return spec.Id, wfs.putAt(ctx, ParsePath(p), v)
+	return v, nil
+}
+
+func (wfs *WebFS) PutAt(ctx context.Context, p string, index int, o *webfsim.Object) error {
+	var (
+		parent Object
+		name   string
+		err    error
+	)
+	if index-1 < 0 {
+		parent, name, err = wfs.lookupParent(ctx, ParsePath(p))
+		if err != nil {
+			return err
+		}
+	} else {
+		objs, err := wfs.GetAtPath(ctx, p)
+		if err != nil {
+			return err
+		}
+		if index-1 >= len(objs) {
+			return errors.New("no parent object found")
+		}
+		parent = objs[index-1]
+	}
+
+	return putAt(ctx, parent, name, o)
 }
 
 func (wfs *WebFS) putAt(ctx context.Context, p Path, o webfsim.Object) error {
@@ -273,10 +295,10 @@ func (wfs *WebFS) putAt(ctx context.Context, p Path, o webfsim.Object) error {
 		if name != "" {
 			return errors.New("volumes do not support entries")
 		}
-		put = x.put
+		put = x.ApplyObject
 	case *Dir:
 		put = func(ctx context.Context, fn ObjectMutator) error {
-			return x.put(ctx, name, fn)
+			return x.ApplyEntry(ctx, name, fn)
 		}
 	default:
 		panic("lookup returned file")
@@ -300,6 +322,9 @@ func (wfs *WebFS) GetVolume(ctx context.Context, id string) (*Volume, error) {
 		}
 		return true
 	})
+	if vol == nil {
+		return nil, ErrNotExist
+	}
 	return vol, err
 }
 
@@ -312,7 +337,9 @@ func (wfs *WebFS) ListVolumes(ctx context.Context) ([]*Volume, error) {
 		}
 		return true
 	})
-	log.Println(err)
+	if err != nil {
+		log.Println(err)
+	}
 	return vols, nil
 }
 
@@ -351,6 +378,19 @@ func (wfs *WebFS) Copy(ctx context.Context, o Object, dst string) (Object, error
 		return nil, errors.New("copy accross volumes not yet supported")
 	}
 
+}
+
+func (wfs *WebFS) DeleteAt(ctx context.Context, p string, index int) error {
+	objs, err := wfs.getAtPath(ctx, ParsePath(p), index+1)
+	if err != nil {
+		return err
+	}
+	if len(objs) <= index {
+		return ErrNotExist
+	}
+	o := objs[index]
+
+	return deleteAt(ctx, o.getParent(), o.getName())
 }
 
 func (wfs *WebFS) getStore() *Store {

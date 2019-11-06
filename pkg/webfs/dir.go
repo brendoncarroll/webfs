@@ -3,13 +3,13 @@ package webfs
 import (
 	"context"
 	"errors"
-	"log"
 	"os"
 	"time"
 
 	"github.com/brendoncarroll/webfs/pkg/webfsim"
 	"github.com/brendoncarroll/webfs/pkg/webref"
 	"github.com/brendoncarroll/webfs/pkg/wrds"
+	"github.com/golang/protobuf/jsonpb"
 )
 
 type DirMutator func(cur *webfsim.Dir) (*webfsim.Dir, error)
@@ -51,7 +51,7 @@ func NewDir(ctx context.Context, parent Object, name string) (*Dir, error) {
 	return dir, nil
 }
 
-func (d *Dir) GetAtPath(ctx context.Context, p Path, objs []Object) ([]Object, error) {
+func (d *Dir) GetAtPath(ctx context.Context, p Path, objs []Object, max int) ([]Object, error) {
 	if len(p) == 0 {
 		return append(objs, d), nil
 	}
@@ -62,11 +62,11 @@ func (d *Dir) GetAtPath(ctx context.Context, p Path, objs []Object) ([]Object, e
 	if o == nil {
 		return nil, nil
 	}
-	return o.GetAtPath(ctx, p[1:], objs)
+	return o.GetAtPath(ctx, p[1:], objs, max)
 }
 
 func (d *Dir) Lookup(ctx context.Context, p Path) (Object, error) {
-	objs, err := d.GetAtPath(ctx, p, []Object{})
+	objs, err := d.GetAtPath(ctx, p, []Object{}, -1)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +207,7 @@ func (d *Dir) split(ctx context.Context, s webref.Poster, x webfsim.Dir) (*webfs
 	return &webfsim.Dir{Tree: newTree}, nil
 }
 
-func (d *Dir) put(ctx context.Context, name string, fn ObjectMutator) error {
+func (d *Dir) ApplyEntry(ctx context.Context, name string, fn ObjectMutator) error {
 	store := d.getStore()
 	opts := d.getOptions()
 	ctx = webref.SetCodecCtx(ctx, opts.DataOpts.Codec)
@@ -233,25 +233,24 @@ func (d *Dir) put(ctx context.Context, name string, fn ObjectMutator) error {
 	})
 }
 
-func (d *Dir) Apply(ctx context.Context, fn DirMutator) error {
-	var (
-		put    func(context.Context, ObjectMutator) error
-		newDir *webfsim.Dir
-	)
-
-	switch x := d.parent.(type) {
-	case *Volume:
-		put = x.put
-	case *Dir:
-		put = func(ctx context.Context, fn ObjectMutator) error {
-			return x.put(ctx, d.nameInParent, fn)
-		}
-	default:
-		log.Printf("value: %v type: %T\n", d.parent, d.parent)
-		panic("invalid parent")
+func (d *Dir) Describe() string {
+	m := jsonpb.Marshaler{
+		Indent: " ",
 	}
+	o := &webfsim.Object{
+		Value: &webfsim.Object_Dir{&d.m},
+	}
+	s, err := m.MarshalToString(o)
+	if err != nil {
+		panic(err)
+	}
+	return s
+}
 
-	err := put(ctx, func(cur *webfsim.Object) (*webfsim.Object, error) {
+func (d *Dir) Apply(ctx context.Context, fn DirMutator) error {
+	var newDir *webfsim.Dir
+
+	err := apply(ctx, d.parent, d.nameInParent, func(cur *webfsim.Object) (*webfsim.Object, error) {
 		var curDir *webfsim.Dir
 		if cur != nil {
 			od, ok := cur.Value.(*webfsim.Object_Dir)
@@ -283,6 +282,6 @@ func (d *Dir) Apply(ctx context.Context, fn DirMutator) error {
 
 func (d *Dir) Sync(ctx context.Context) error {
 	return d.Apply(ctx, func(cur *webfsim.Dir) (*webfsim.Dir, error) {
-		return nil, nil
+		return cur, nil
 	})
 }

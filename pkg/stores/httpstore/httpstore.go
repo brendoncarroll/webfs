@@ -26,28 +26,34 @@ type HttpStore struct {
 
 func New(endpoint string, prefix string, headers map[string]string) (*HttpStore, error) {
 	s := &HttpStore{
-		endpoint: endpoint,
-		prefix:   prefix,
-		hc:       http.DefaultClient,
-		headers:  headers,
+		endpoint:    endpoint,
+		prefix:      prefix,
+		hc:          http.DefaultClient,
+		headers:     headers,
+		maxBlobSize: -1,
 	}
 
-	mbsURL := endpoint + "/.maxBlobSize"
-	r := s.newRequest(context.TODO(), http.MethodGet, mbsURL, nil)
-	resp, err := s.hc.Do(r)
+	return s, s.Init(context.TODO())
+}
+
+func (hs *HttpStore) Init(ctx context.Context) error {
+	mbsURL := hs.endpoint + "/.maxBlobSize"
+	r := hs.newRequest(ctx, http.MethodGet, mbsURL, nil)
+	resp, err := hs.hc.Do(r)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, errorFromRes(resp)
+		return errorFromRes(resp)
 	}
 
-	if _, err := fmt.Fscanf(resp.Body, "%d", &s.maxBlobSize); err != nil {
-		return nil, err
+	if _, err := fmt.Fscanf(resp.Body, "%d", &hs.maxBlobSize); err != nil {
+		return err
 	}
-	return s, nil
+
+	return nil
 }
 
 func (hs *HttpStore) Get(ctx context.Context, key string) ([]byte, error) {
@@ -179,7 +185,7 @@ func (hs *HttpStore) removePrefix(x string) (string, error) {
 		return "", errors.New("Wrong key: " + x)
 	}
 	y := x[len(hs.prefix):]
-	if y[0] == '/' {
+	if len(y) > 0 && y[0] == '/' {
 		return y[1:], nil
 	}
 	return y, nil

@@ -5,139 +5,179 @@ import (
 	"context"
 	"errors"
 	fmt "fmt"
-	"sync/atomic"
+	"log"
+	"sync"
 
+	"github.com/golang/protobuf/jsonpb"
 	"github.com/golang/protobuf/proto"
 
 	"github.com/brendoncarroll/webfs/pkg/cells"
 )
 
 var (
-	ErrCellUninitialized = errors.New("cell is uninitialized")
-	ErrCellInitialized   = errors.New("cannot initialize already initialized cell")
+	ErrCellUnclaimed = errors.New("cell is unclaimed")
+	ErrCellClaimed   = errors.New("cannot initialize already initialized cell")
 )
 
 type Spec struct {
-	Inner cells.Cell
+	Inner, AuxState cells.Cell
 
 	PrivateEntity *Entity
 	PublicEntity  *Entity
 }
 
-type payloadMapping struct {
-	payload  []byte
-	contents *CellContents
+type mapping struct {
+	raw []byte
+
+	state   *CellState
+	payload []byte
 }
 
 type Cell struct {
+	spec Spec
+
 	innerCell cells.Cell
-	spec      Spec
+	auxState  cells.Cell
 
-	auxState cells.Cell
-
-	latestPayload atomic.Value
+	mu            sync.Mutex
+	latestMapping *mapping
 }
 
-func New(spec Spec, auxState cells.Cell) *Cell {
+func New(spec Spec) *Cell {
 	cell := &Cell{
 		innerCell: spec.Inner,
 		spec:      spec,
-		auxState:  auxState,
+		auxState:  spec.AuxState,
 	}
 	return cell
 }
 
 func (c *Cell) Get(ctx context.Context) ([]byte, error) {
-	return c.get(ctx)
+	m, err := c.getMapping(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+	if m.state == nil {
+		return nil, ErrCellUnclaimed
+	}
+	return m.payload, nil
 }
 
-func (c *Cell) get(ctx context.Context) ([]byte, error) {
-	contents, err := c.getContents(ctx, true)
-	if err != nil {
-		return nil, err
-	}
-	if contents.Who == nil || contents.What == nil {
-		return nil, ErrCellUninitialized
-	}
-
-	payload, err := GetPayload(contents, c.spec.PrivateEntity)
-	if err != nil {
-		return nil, err
-	}
-	c.latestPayload.Store(&payloadMapping{
-		contents: contents,
-		payload:  payload,
-	})
-
-	return payload, err
+func (c *Cell) getRaw(ctx context.Context) ([]byte, error) {
+	return c.innerCell.Get(ctx)
 }
 
-func (c *Cell) getContents(ctx context.Context, validate bool) (*CellContents, error) {
-	data, err := c.innerCell.Get(ctx)
+func (c *Cell) getMapping(ctx context.Context, validate bool) (*mapping, error) {
+	var m *mapping
+	defer c.storeMapping(m)
+
+	raw, err := c.getRaw(ctx)
 	if err != nil {
 		return nil, err
 	}
-	contents := &CellContents{}
-	if err := proto.Unmarshal(data, contents); err != nil {
+
+	// empty
+	if len(raw) < 1 {
+		m = &mapping{
+			raw:     raw,
+			state:   nil,
+			payload: nil,
+		}
+		return m, nil
+	}
+
+	state := &CellState{}
+	if err := proto.Unmarshal(raw, state); err != nil {
+		m = &mapping{
+			raw:     raw,
+			state:   nil,
+			payload: nil,
+		}
 		return nil, err
 	}
+	m = &mapping{
+		raw:     raw,
+		state:   state,
+		payload: nil,
+	}
+
 	if !validate {
-		return contents, nil
+		return m, nil
 	}
 
 	// validation
-	localWho, err := c.getLocalWho(ctx)
+	localACL, err := c.getLocalACL(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	errs := ValidateContents(localWho, contents)
+	errs := ValidateState(localACL, state)
 	if len(errs) > 0 {
 		return nil, fmt.Errorf("validation errors %v", errs)
 	}
-
-	if err := c.setLocalWho(ctx, localWho, contents.Who); err != nil {
+	if err := c.setLocalACL(ctx, state.Acl); err != nil {
 		return nil, err
 	}
-	return contents, nil
+
+	// get payload
+	payload, err := GetPayload(state, c.getPrivate())
+	if err != nil {
+		return nil, err
+	}
+	m = &mapping{
+		raw:     raw,
+		state:   state,
+		payload: payload,
+	}
+
+	return m, nil
 }
 
 func (c *Cell) CAS(ctx context.Context, cur, next []byte) (bool, error) {
-	pm := c.latestPayload.Load().(*payloadMapping)
+	var err error
+	pm := c.getMappingStale()
+	if pm == nil {
+		pm, err = c.getMapping(ctx, true)
+		if err != nil {
+			return false, err
+		}
+	}
+	if pm.state == nil {
+		return false, ErrCellUnclaimed
+	}
 	// if it's not what the cell believes to be the latest don't even try.
 	if bytes.Compare(pm.payload, cur) != 0 {
-		return false, nil
+		log.Println("INFO: caller does not have latest cell state")
+		if _, err := c.getMapping(ctx, true); err != nil {
+			return false, err
+		}
+		return c.CAS(ctx, cur, next)
 	}
 	// if it is, then use the latest contents as the current
-	curContents := pm.contents
+	curState := pm.state
 
 	// create next contents with the next payload
-	nextContents, err := PutPayload(curContents, c.getPrivate(), next)
+	nextState, err := PutPayload(curState, c.getPrivate(), next)
 	if err != nil {
 		return false, err
 	}
 
-	success, err := c.cas(ctx, curContents, nextContents)
+	success, err := c.cas(ctx, curState, nextState, cur)
 	if err != nil {
 		return false, err
-	}
-
-	if success {
-		c.latestPayload.Store(&payloadMapping{
-			contents: nextContents,
-			payload:  next,
-		})
 	}
 
 	return success, nil
 }
 
-func (c *Cell) cas(ctx context.Context, curContents, nextContents *CellContents) (bool, error) {
-	curBytes, err := proto.Marshal(curContents)
-	if err != nil {
-		return false, err
+func (c *Cell) cas(ctx context.Context, curState, nextState *CellState, ptext []byte) (bool, error) {
+	var err error
+	pm := c.getMappingStale()
+	if pm == nil {
+		pm, err = c.getMapping(ctx, true)
 	}
-	nextBytes, err := proto.Marshal(nextContents)
+	curBytes := pm.raw
+
+	nextBytes, err := proto.Marshal(nextState)
 	if err != nil {
 		return false, err
 	}
@@ -146,6 +186,14 @@ func (c *Cell) cas(ctx context.Context, curContents, nextContents *CellContents)
 	if err != nil {
 		return false, err
 	}
+
+	ptext2 := make([]byte, len(ptext))
+	copy(ptext2, ptext)
+	c.storeMapping(&mapping{
+		raw:     nextBytes,
+		state:   nextState,
+		payload: ptext2,
+	})
 	return success, nil
 }
 
@@ -153,11 +201,23 @@ func (c *Cell) URL() string {
 	return "ccp-" + c.innerCell.URL()
 }
 
+func (c *Cell) storeMapping(pm *mapping) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.latestMapping = pm
+}
+
+func (c *Cell) getMappingStale() *mapping {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.latestMapping
+}
+
 func (c *Cell) getPrivate() *Entity {
 	return c.spec.PrivateEntity
 }
 
-func (c *Cell) getLocalWho(ctx context.Context) (*Who, error) {
+func (c *Cell) getLocalState(ctx context.Context) (*LocalState, error) {
 	data, err := c.auxState.Get(ctx)
 	if err != nil {
 		return nil, err
@@ -165,23 +225,26 @@ func (c *Cell) getLocalWho(ctx context.Context) (*Who, error) {
 	if len(data) < 1 {
 		return nil, nil
 	}
-	ret := &Who{}
+	ret := &LocalState{}
 	return ret, proto.Unmarshal(data, ret)
 }
 
-func (c *Cell) setLocalWho(ctx context.Context, cur, next *Who) error {
-	var curBytes []byte
-	var err error
-	if cur != nil {
-		curBytes, err = proto.Marshal(cur)
+func (c *Cell) setLocalState(ctx context.Context, next *LocalState) error {
+	var (
+		nextBytes []byte
+		err       error
+	)
+
+	curBytes, err := c.auxState.Get(ctx)
+	if err != nil {
+		return err
+	}
+
+	if next != nil {
+		nextBytes, err = proto.Marshal(next)
 		if err != nil {
 			return err
 		}
-	}
-
-	nextBytes, err := proto.Marshal(next)
-	if err != nil {
-		return err
 	}
 
 	success, err := c.auxState.CAS(ctx, curBytes, nextBytes)
@@ -194,31 +257,33 @@ func (c *Cell) setLocalWho(ctx context.Context, cur, next *Who) error {
 	return nil
 }
 
-// AcceptRemote accpets the Authorization settings from the
-// remote server.
-func (c *Cell) AcceptRemote(ctx context.Context) error {
-	current, err := c.getContents(ctx, false)
+func (c *Cell) getLocalACL(ctx context.Context) (*ACL, error) {
+	localState, err := c.getLocalState(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	localWho, err := c.getLocalWho(ctx)
-	if err != nil {
-		return err
+	if localState == nil {
+		return nil, nil
 	}
-	return c.setLocalWho(ctx, localWho, current.Who)
+	return localState.Acl, nil
 }
 
-func (c *Cell) Init(ctx context.Context) error {
-	current, err := c.getContents(ctx, false)
+func (c *Cell) setLocalACL(ctx context.Context, next *ACL) error {
+	return c.setLocalState(ctx, &LocalState{Acl: next})
+}
+
+func (c *Cell) Claim(ctx context.Context) error {
+	m, err := c.getMapping(ctx, false)
 	if err != nil {
 		return err
 	}
-
-	if current.Who != nil {
-		return ErrCellInitialized
+	current := m.state
+	if current != nil && current.Acl != nil {
+		return ErrCellClaimed
 	}
 
-	next, err := AddEntity(current, c.spec.PrivateEntity, c.spec.PublicEntity)
+	next := &CellState{}
+	next, err = AddEntity(next, c.spec.PrivateEntity, c.spec.PublicEntity)
 	if err != nil {
 		return err
 	}
@@ -239,7 +304,7 @@ func (c *Cell) Init(ctx context.Context) error {
 		return err
 	}
 
-	success, err := c.cas(ctx, current, next)
+	success, err := c.cas(ctx, current, next, nil)
 	if err != nil {
 		return err
 	}
@@ -247,24 +312,42 @@ func (c *Cell) Init(ctx context.Context) error {
 		return errors.New("CAS failed during init. Another party using cell?")
 	}
 
-	c.latestPayload.Store(&payloadMapping{
-		contents: next,
-		payload:  nil,
-	})
+	if err := c.setLocalACL(ctx, next.Acl); err != nil {
+		return err
+	}
+
 	return nil
 }
 
-func (c *Cell) AddEntity(ctx context.Context, ent *Entity) error {
-	prev, err := c.getContents(ctx, true)
+func (c *Cell) Join(ctx context.Context, fn func(x interface{}) bool) error {
+	m, err := c.getMapping(ctx, false)
 	if err != nil {
 		return err
 	}
+	current := m.state
+	if current == nil {
+		return ErrCellUnclaimed
+	}
+	ok := fn(current.Acl)
+	if !ok {
+		return errors.New("join refused by callback")
+	}
+	return c.setLocalACL(ctx, current.Acl)
+}
+
+func (c *Cell) AddEntity(ctx context.Context, ent *Entity) error {
+	m, err := c.getMapping(ctx, true)
+	if err != nil {
+		return err
+	}
+	prev := m.state
+
 	next, err := AddEntity(prev, c.getPrivate(), ent)
 	if err != nil {
 		return err
 	}
 
-	success, err := c.cas(ctx, prev, next)
+	success, err := c.cas(ctx, prev, next, nil)
 	if err != nil {
 		return err
 	}
@@ -293,12 +376,13 @@ func (c *Cell) GrantRead(ctx context.Context, ent *Entity) error {
 }
 
 func (c *Cell) grantRole(ctx context.Context, ent *Entity, role int) error {
-	prev, err := c.getContents(ctx, true)
+	m, err := c.getMapping(ctx, true)
 	if err != nil {
 		return err
 	}
+	prev := m.state
 
-	var next *CellContents
+	var next *CellState
 	switch role {
 	case roleAdmin:
 		next, err = AddAdmin(prev, c.getPrivate(), ent)
@@ -313,7 +397,7 @@ func (c *Cell) grantRole(ctx context.Context, ent *Entity, role int) error {
 		return err
 	}
 
-	success, err := c.cas(ctx, prev, next)
+	success, err := c.cas(ctx, prev, next, nil)
 	if err != nil {
 		return err
 	}
@@ -323,11 +407,30 @@ func (c *Cell) grantRole(ctx context.Context, ent *Entity, role int) error {
 	return nil
 }
 
-func (c *Cell) AuxState() string {
-	ctx := context.TODO()
-	who, err := c.getLocalWho(ctx)
+func (c *Cell) ResetAuxState(ctx context.Context) error {
+	return cells.ForcePut(ctx, c.auxState, nil, 10)
+}
+
+func (c *Cell) Inspect(ctx context.Context) string {
+	buf := &bytes.Buffer{}
+	buf.WriteString("--RWA CRYPTO CELL--\n")
+	buf.WriteString("URL: " + c.URL() + "\n")
+
+	buf.WriteString("CELL STATE:\n")
+	mp, err := c.getMapping(ctx, false)
 	if err != nil {
-		return "error"
+		fmt.Fprint(buf, "error: ", err)
 	}
-	return who.String()
+	state := mp.state
+	m := jsonpb.Marshaler{Indent: " "}
+	m.Marshal(buf, state)
+	buf.WriteString("\n")
+
+	buf.WriteString("AUX STATE:\n")
+	local, err := c.getLocalACL(ctx)
+	if err != nil {
+		fmt.Fprint(buf, "error: ", err)
+	}
+	m.Marshal(buf, local)
+	return buf.String()
 }

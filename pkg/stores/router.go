@@ -30,15 +30,15 @@ func NewRouter(routes []StoreRoute) *Router {
 }
 
 func (r *Router) Get(ctx context.Context, key string) ([]byte, error) {
-	s := r.LookupStore(key)
+	s, key2 := r.LookupStore(key)
 	if s == nil {
 		return nil, ErrNoRoute
 	}
-	return s.Get(ctx, key)
+	return s.Get(ctx, key2)
 }
 
 func (r *Router) Post(ctx context.Context, prefix string, data []byte) (string, error) {
-	s := r.LookupStore(prefix)
+	s, prefix2 := r.LookupStore(prefix)
 	if s == nil {
 		return "", ErrNoRoute
 	}
@@ -46,11 +46,16 @@ func (r *Router) Post(ctx context.Context, prefix string, data []byte) (string, 
 	if !ok {
 		return "", ErrNoPost
 	}
-	return w.Post(ctx, prefix, data)
+
+	key, err := w.Post(ctx, prefix2, data)
+	if err != nil {
+		return "", err
+	}
+	return prefix + key, nil
 }
 
 func (r *Router) Delete(ctx context.Context, key string) error {
-	s := r.LookupStore(key)
+	s, key2 := r.LookupStore(key)
 	if s == nil {
 		return ErrNoRoute
 	}
@@ -58,33 +63,33 @@ func (r *Router) Delete(ctx context.Context, key string) error {
 	if !ok {
 		return ErrNoDelete
 	}
-	return w.Delete(ctx, key)
+	return w.Delete(ctx, key2)
 }
 
 func (r *Router) Check(ctx context.Context, key string) error {
-	s := r.LookupStore(key)
+	s, key2 := r.LookupStore(key)
 	if s == nil {
 		return ErrNoRoute
 	}
 	c, ok := s.(Check)
 	if !ok {
-		_, err := s.Get(ctx, key)
+		_, err := s.Get(ctx, key2)
 		return err
 	}
-	return c.Check(ctx, key)
+	return c.Check(ctx, key2)
 }
 
 func (r *Router) AppendWith(b *Router) {
 	r.routes = append(r.routes, b.routes...)
 }
 
-func (r *Router) LookupStore(key string) Read {
+func (r *Router) LookupStore(key string) (Read, string) {
 	for _, route := range r.routes {
 		if strings.HasPrefix(key, route.Prefix) {
-			return route.Store
+			return route.Store, key[len(route.Prefix):]
 		}
 	}
-	return nil
+	return nil, key
 }
 
 func (r *Router) MaxBlobSize() int {

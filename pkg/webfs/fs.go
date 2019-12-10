@@ -359,25 +359,24 @@ func (wfs *WebFS) Copy(ctx context.Context, o Object, dst string) (Object, error
 	parV := containingVolume(parent)
 	oV := containingVolume(o)
 
-	if parV.spec.Id == oV.spec.Id {
-		switch o := o.(type) {
-		case *File:
-			oCopy := *o
-			oCopy.parent = parent
-			oCopy.nameInParent = name
-			return &oCopy, oCopy.Sync(ctx)
-		case *Dir:
-			oCopy := *o
-			oCopy.parent = parent
-			oCopy.nameInParent = name
-			return &oCopy, oCopy.Sync(ctx)
-		default:
-			return nil, ErrObjectType
-		}
-	} else {
+	if parV.spec.Id != oV.spec.Id {
 		return nil, errors.New("copy accross volumes not yet supported")
 	}
 
+	switch o := o.(type) {
+	case *File:
+		oCopy := *o
+		oCopy.parent = parent
+		oCopy.nameInParent = name
+		return &oCopy, oCopy.Sync(ctx)
+	case *Dir:
+		oCopy := *o
+		oCopy.parent = parent
+		oCopy.nameInParent = name
+		return &oCopy, oCopy.Sync(ctx)
+	default:
+		return nil, ErrObjectType
+	}
 }
 
 func (wfs *WebFS) DeleteAt(ctx context.Context, p string, index int) error {

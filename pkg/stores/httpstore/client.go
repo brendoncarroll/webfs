@@ -10,7 +10,6 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"strings"
 
 	"github.com/brendoncarroll/webfs/pkg/stores"
 	"github.com/multiformats/go-multihash"
@@ -18,22 +17,21 @@ import (
 
 type HttpStore struct {
 	endpoint    string
-	prefix      string
 	maxBlobSize int
 	headers     map[string]string
 	hc          *http.Client
+	validateMH  bool
 }
 
-func New(endpoint string, prefix string, headers map[string]string) (*HttpStore, error) {
+func New(endpoint string, headers map[string]string) *HttpStore {
 	s := &HttpStore{
 		endpoint:    endpoint,
-		prefix:      prefix,
 		hc:          http.DefaultClient,
 		headers:     headers,
 		maxBlobSize: -1,
+		validateMH:  true,
 	}
-
-	return s, s.Init(context.TODO())
+	return s
 }
 
 func (hs *HttpStore) Init(ctx context.Context) error {
@@ -57,24 +55,7 @@ func (hs *HttpStore) Init(ctx context.Context) error {
 }
 
 func (hs *HttpStore) Get(ctx context.Context, key string) ([]byte, error) {
-	key2, err := hs.removePrefix(key)
-	if err != nil {
-		return nil, err
-	}
-	if key2[0] == '/' {
-		key2 = key2[1:]
-	}
-
-	mhBytes, err := base64.URLEncoding.DecodeString(key2)
-	if err != nil {
-		return nil, err
-	}
-	want, err := multihash.Decode(mhBytes)
-	if err != nil {
-		return nil, err
-	}
-
-	req := hs.newRequest(ctx, http.MethodGet, hs.getURL(key2), nil)
+	req := hs.newRequest(ctx, http.MethodGet, hs.getURL(key), nil)
 
 	resp, err := hs.hc.Do(req)
 	if err != nil {
@@ -97,21 +78,29 @@ func (hs *HttpStore) Get(ctx context.Context, key string) ([]byte, error) {
 		return nil, err
 	}
 
-	actual, err := multihash.Sum(data, want.Code, want.Length)
-	if err != nil {
-		return nil, err
+	if hs.validateMH {
+		mhBytes, err := base64.URLEncoding.DecodeString(key)
+		if err != nil {
+			return nil, err
+		}
+		want, err := multihash.Decode(mhBytes)
+		if err != nil {
+			return nil, err
+		}
+
+		actual, err := multihash.Sum(data, want.Code, want.Length)
+		if err != nil {
+			return nil, err
+		}
+		if bytes.Compare(mhBytes, actual) != 0 {
+			return nil, errors.New("got bad data from store")
+		}
 	}
-	if bytes.Compare(mhBytes, actual) != 0 {
-		return nil, errors.New("got bad data from store")
-	}
+
 	return data, nil
 }
 
 func (hs *HttpStore) Check(ctx context.Context, key string) (err error) {
-	key, err = hs.removePrefix(key)
-	if err != nil {
-		return err
-	}
 	u := hs.getURL(key)
 	req := hs.newRequest(ctx, http.MethodHead, u, nil)
 	resp, err := hs.hc.Do(req)
@@ -126,12 +115,11 @@ func (hs *HttpStore) Check(ctx context.Context, key string) (err error) {
 }
 
 func (hs *HttpStore) Post(ctx context.Context, prefix string, data []byte) (string, error) {
+	if len(prefix) > 0 {
+		return "", errors.New("prefix must be empty")
+	}
 	if len(data) > hs.maxBlobSize {
 		return "", stores.ErrMaxSizeExceeded
-	}
-	_, err := hs.removePrefix(prefix)
-	if err != nil {
-		return "", err
 	}
 
 	buf := bytes.NewBuffer(data)
@@ -153,8 +141,29 @@ func (hs *HttpStore) Post(ctx context.Context, prefix string, data []byte) (stri
 	if resp.StatusCode != http.StatusOK {
 		return "", errorFromRes(resp)
 	}
-	key := hs.prefix + "/" + string(body)
-	return key, nil
+
+	if hs.validateMH {
+		mhBytes := make([]byte, enc.DecodedLen(len(body)))
+		n, err := enc.Decode(mhBytes, body)
+		if err != nil {
+			return "", err
+		}
+		mhBytes = mhBytes[:n]
+
+		mh, err := multihash.Decode(mhBytes)
+		if err != nil {
+			return "", err
+		}
+		mh2, err := multihash.Sum(data, mh.Code, mh.Length)
+		if err != nil {
+			return "", err
+		}
+		if bytes.Compare(mhBytes, mh2) != 0 {
+			return "", errors.New("server gave bad multihash for data")
+		}
+	}
+
+	return string(body), nil
 }
 
 func (hs *HttpStore) MaxBlobSize() int {
@@ -162,10 +171,6 @@ func (hs *HttpStore) MaxBlobSize() int {
 }
 
 func (hs *HttpStore) Delete(ctx context.Context, key string) (err error) {
-	key, err = hs.removePrefix(key)
-	if err != nil {
-		return err
-	}
 	u := hs.getURL(key)
 
 	req := hs.newRequest(ctx, http.MethodDelete, u, nil)
@@ -178,17 +183,6 @@ func (hs *HttpStore) Delete(ctx context.Context, key string) (err error) {
 		return errorFromRes(resp)
 	}
 	return nil
-}
-
-func (hs *HttpStore) removePrefix(x string) (string, error) {
-	if !strings.HasPrefix(x, hs.prefix) {
-		return "", errors.New("Wrong key: " + x)
-	}
-	y := x[len(hs.prefix):]
-	if len(y) > 0 && y[0] == '/' {
-		return y[1:], nil
-	}
-	return y, nil
 }
 
 func (hs *HttpStore) getURL(x string) string {

@@ -197,6 +197,24 @@ func TestMove(t *testing.T) {
 	f, err = wfs.Lookup(ctx, p2)
 	require.Nil(t, err)
 	require.NotNil(t, f)
+
+	const (
+		dp1 = "dir1"
+		dp2 = "dir2"
+	)
+	err = wfs.Mkdir(ctx, dp1)
+	require.Nil(t, err)
+	dir, err := wfs.Lookup(ctx, dp1)
+	require.Nil(t, err)
+
+	err = wfs.Move(ctx, dir, dp2)
+	require.Nil(t, err)
+
+	_, err = wfs.Lookup(ctx, dp1)
+	require.Equal(t, ErrNotExist, err)
+	dir2, err := wfs.Lookup(ctx, dp2)
+	require.Nil(t, err)
+	require.NotNil(t, dir2)
 }
 
 func TestLookupParent(t *testing.T) {
@@ -223,4 +241,49 @@ func TestLookupParent(t *testing.T) {
 	require.Nil(t, err)
 	assert.Equal(t, v1.Describe(), o.Describe())
 	assert.Equal(t, name, "")
+}
+
+func TestDeleteAt(t *testing.T) {
+	wfs := getTestFS()
+	err := wfs.Mkdir(ctx, "")
+	require.Nil(t, err)
+
+	// file
+	p := "testfile.txt"
+	err = wfs.ImportFile(ctx, nil, p)
+	require.Nil(t, err)
+	o, err := wfs.Lookup(ctx, p)
+	require.Nil(t, err)
+	require.NotNil(t, o)
+
+	err = wfs.DeleteAt(ctx, p, 0)
+	require.Nil(t, err)
+	_, err = wfs.Lookup(ctx, p)
+	require.Equal(t, ErrNotExist, err)
+
+	// directory
+	p = "testdir"
+	err = wfs.Mkdir(ctx, p)
+	require.Nil(t, err)
+	o, err = wfs.Lookup(ctx, p)
+	require.Nil(t, err)
+	require.NotNil(t, o)
+
+	err = wfs.DeleteAt(ctx, p, 0)
+	require.Nil(t, err)
+	_, err = wfs.Lookup(ctx, p)
+	require.Equal(t, ErrNotExist, err)
+
+	// volume
+	p = "vol1"
+	_, err = wfs.NewVolume(ctx, p)
+	require.Nil(t, err)
+	o, err = wfs.Lookup(ctx, p)
+	require.Nil(t, err)
+	require.NotNil(t, o)
+
+	err = wfs.DeleteAt(ctx, p, 0)
+	require.Nil(t, err)
+	_, err = wfs.Lookup(ctx, p)
+	require.Equal(t, ErrNotExist, err)
 }

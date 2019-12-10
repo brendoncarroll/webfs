@@ -3,7 +3,6 @@ package ipfsstore
 import (
 	"context"
 	"errors"
-	"strings"
 
 	"github.com/brendoncarroll/webfs/pkg/stores"
 	ipfsapi "github.com/ipfs/go-ipfs-api"
@@ -18,8 +17,6 @@ const (
 	DefaultLocalURL    = "http://127.0.0.1:5001"
 	OfficialGatewayURL = "https://ipfs.io"
 	CloudflareURL      = "https://cloudflare-ipfs.com"
-
-	urlPrefix = "ipfs://"
 )
 
 type IPFSStore = stores.ReadPost
@@ -37,14 +34,13 @@ type ipfsClient struct {
 }
 
 func (s *ipfsClient) Get(ctx context.Context, key string) ([]byte, error) {
-	if !strings.HasPrefix(key, urlPrefix) {
-		return nil, errors.New("Invalid key: " + key)
-	}
-	p := key[len(urlPrefix):]
-	return s.client.BlockGet(p)
+	return s.client.BlockGet(key)
 }
 
-func (s *ipfsClient) Post(ctx context.Context, key string, data []byte) (string, error) {
+func (s *ipfsClient) Post(ctx context.Context, prefix string, data []byte) (string, error) {
+	if len(prefix) > 0 {
+		return "", errors.New("prefix must be empty")
+	}
 	var (
 		format = ""
 		mhtype = DefaultMHType
@@ -54,7 +50,7 @@ func (s *ipfsClient) Post(ctx context.Context, key string, data []byte) (string,
 	if err != nil {
 		return "", err
 	}
-	return urlPrefix + k, nil
+	return k, nil
 }
 
 func (s *ipfsClient) MaxBlobSize() int {

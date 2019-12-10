@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log"
 	"os"
-	"time"
 
 	"bazil.org/fuse"
 	fusefs "bazil.org/fuse/fs"
@@ -89,8 +88,12 @@ func (d *Dir) Rename(ctx context.Context, req *fuse.RenameRequest, newDir fusefs
 	dst := newDir.(*Dir).d.Path()
 	dst = append(dst, req.NewName)
 
+	log.Println("Rename", o.Path(), "->", dst)
 	fs := d.d.FS()
-	return fs.Move(ctx, o, dst.String())
+	if err := fs.Move(ctx, o, dst.String()); err != nil {
+		return fuseErr(err)
+	}
+	return nil
 }
 
 func (d *Dir) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
@@ -118,7 +121,7 @@ func toDirent(x webfs.DirEntry) fuse.Dirent {
 
 func toAttr(finfo webfs.FileInfo) fuse.Attr {
 	return fuse.Attr{
-		Valid: time.Minute,
+		Valid: 0,
 
 		Atime: finfo.AccessedAt,
 		Ctime: finfo.CreatedAt,
@@ -138,6 +141,7 @@ func fuseErr(err error) error {
 	case os.ErrExist:
 		return fuse.EEXIST
 	default:
+		log.Println("ERROR:", err)
 		return err
 	}
 }

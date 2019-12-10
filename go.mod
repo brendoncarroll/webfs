@@ -4,7 +4,6 @@ go 1.12
 
 require (
 	bazil.org/fuse v0.0.0-20180421153158-65cc252bf669
-	github.com/Yawning/chacha20 v0.0.0-20170904085104-e3b1f968fc63
 	github.com/dustin/go-humanize v1.0.0
 	github.com/gogo/protobuf v1.2.1
 	github.com/golang/protobuf v1.3.1
@@ -13,7 +12,7 @@ require (
 	github.com/multiformats/go-multihash v0.0.1
 	github.com/spf13/cobra v0.0.5
 	github.com/stretchr/testify v1.3.0
-	golang.org/x/crypto v0.0.0-20190618222545-ea8f1a30c443
+	golang.org/x/crypto v0.0.0-20191206172530-e9b2fee46413
 	golang.org/x/net v0.0.0-20190606173856-1492cefac77f // indirect
 	golang.org/x/sys v0.0.0-20190606203320-7fc4e5ec1444 // indirect
 )

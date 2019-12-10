@@ -10,10 +10,9 @@ import (
 	fmt "fmt"
 	"math/bits"
 
-	"golang.org/x/crypto/sha3"
-	// golang.org/x/crypto/internal/chacha20 is internal
-	"github.com/Yawning/chacha20"
 	"github.com/brendoncarroll/webfs/pkg/stores"
+	"golang.org/x/crypto/chacha20"
+	"golang.org/x/crypto/sha3"
 )
 
 type CryptoStore struct {
@@ -87,7 +86,7 @@ func crypt(algo EncAlgo, secret, in, out []byte) error {
 		streamCipher.XORKeyStream(out, in)
 	case EncAlgo_CHACHA20:
 		nonce := [chacha20.NonceSize]byte{} // 0
-		streamCipher, err := chacha20.NewCipher(secret, nonce[:])
+		streamCipher, err := chacha20.NewUnauthenticatedCipher(secret, nonce[:])
 		if err != nil {
 			return err
 		}

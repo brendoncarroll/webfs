@@ -7,8 +7,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const superblockPath = "./superblock.json"
-
 func init() {
 	newCmd.AddCommand(newFS)
 	rootCmd.AddCommand(newCmd)
@@ -22,11 +20,15 @@ var newCmd = &cobra.Command{
 var newFS = &cobra.Command{
 	Use: "fs",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := webfs.NewSuperblock(superblockPath)
+		p := "superblock.webfs"
+		if len(args) > 0 {
+			p = args[0]
+		}
+		_, err := webfs.NewSuperblock(p)
 		if err != nil {
 			return err
 		}
-		log.Println("created superblock at", superblockPath)
+		log.Println("created superblock at", p)
 		return nil
 	},
 }

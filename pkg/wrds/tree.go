@@ -29,7 +29,9 @@ func NewTree() *Tree {
 }
 
 func (t *Tree) Put(ctx context.Context, s ReadPost, key []byte, ref *Ref) (*Tree, error) {
-	ent := &TreeEntry{Key: key, Ref: ref}
+	key2 := make([]byte, len(key))
+	copy(key2, key)
+	ent := &TreeEntry{Key: key2, Ref: ref}
 	newTree, err := t.put(ctx, s, ent)
 	if err != nil {
 		return nil, err

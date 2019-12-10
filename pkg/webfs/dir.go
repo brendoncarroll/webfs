@@ -282,6 +282,6 @@ func (d *Dir) Apply(ctx context.Context, fn DirMutator) error {
 
 func (d *Dir) Sync(ctx context.Context) error {
 	return d.Apply(ctx, func(cur *webfsim.Dir) (*webfsim.Dir, error) {
-		return cur, nil
+		return &d.m, nil
 	})
 }

@@ -1,7 +1,6 @@
 package webref
 
 import (
-	"bytes"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
@@ -110,10 +109,9 @@ func generateSecret(seed, data []byte) []byte {
 	d := sha3.Sum256(data)
 
 	// concat hash of data with seed
-	x := bytes.Join([][]byte{
-		seed,
-		d[:],
-	}, nil)
+	x := []byte{}
+	x = append(x, seed[:]...)
+	x = append(x, d[:]...)
 
 	y := sha3.Sum256(x)
 	return y[:]

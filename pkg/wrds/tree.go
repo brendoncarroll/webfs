@@ -32,6 +32,7 @@ func (t *Tree) Put(ctx context.Context, s ReadPost, key []byte, ref *Ref) (*Tree
 	key2 := make([]byte, len(key))
 	copy(key2, key)
 	ent := &TreeEntry{Key: key2, Ref: ref}
+
 	newTree, err := t.put(ctx, s, ent)
 	if err != nil {
 		return nil, err
@@ -77,53 +78,22 @@ func (t *Tree) Split(ctx context.Context, s Post) (*Tree, error) {
 }
 
 func (t *Tree) put(ctx context.Context, s ReadPost, ent *TreeEntry) (*Tree, error) {
-	i := t.indexPut(ent.Key)
-
-	entries := []*TreeEntry{}
-	entries = append(entries, t.Entries[:i]...)
-
-	if t.Level > 1 && i < len(t.Entries) {
+	switch {
+	case t.Level > 1 && len(t.Entries) < 1:
 		return nil, errors.New("invalid tree: higher order tree with no entries")
+	case t.Level > 1:
+		return t.replaceSubtree(ctx, s, ent.Key, func(x *Tree) (*Tree, error) {
+			return x.put(ctx, s, ent)
+		})
+	case t.Level == 1:
+		t2 := &Tree{
+			Level:   t.Level,
+			Entries: slicePut(t.Entries, ent),
+		}
+		return t2, nil
+	default:
+		return nil, errors.New("invalid tree level")
 	}
-
-	// find subtree and recurse
-	if t.Level > 1 {
-		subTree := &Tree{}
-		err := webref.GetAndDecode(ctx, s, *t.Entries[i].Ref, subTree)
-		if err != nil {
-			return nil, err
-		}
-
-		subTree, err = subTree.put(ctx, s, ent)
-		if err != nil {
-			return nil, err
-		}
-
-		subTrees := []Tree{*subTree}
-		// check if we need to split
-		codec := webref.GetCodecCtx(ctx)
-		if webref.SizeOf(codec, subTree) > s.MaxBlobSize() {
-			low, high := subTree.split()
-			subTrees = []Tree{low, high}
-		}
-		// we either have one or 2 subtrees, post them all and convert to entries
-		for _, st := range subTrees {
-			ref, err := webref.EncodeAndPost(ctx, s, st)
-			if err != nil {
-				return nil, err
-			}
-			stEnt := &TreeEntry{Key: st.MinKey(), Ref: ref}
-			entries = append(entries, stEnt)
-		}
-	} else {
-		entries = append(entries, ent)
-	}
-
-	if i < len(t.Entries) {
-		entries = append(entries, t.Entries[i+1:]...)
-	}
-	newTree := Tree{Level: t.Level, Entries: entries}
-	return &newTree, nil
 }
 
 func (t *Tree) indexPut(key []byte) int {
@@ -199,7 +169,7 @@ func (t *Tree) MinGt(ctx context.Context, s Read, key []byte) (*TreeEntry, error
 	case t.Level > 1:
 		var ret *TreeEntry
 		if lt >= 0 {
-			st, err := t.getSubtree(ctx, s, lt)
+			st, err := t.getSubtreeAt(ctx, s, lt)
 			if err != nil {
 				return nil, err
 			}
@@ -210,7 +180,7 @@ func (t *Tree) MinGt(ctx context.Context, s Read, key []byte) (*TreeEntry, error
 			ret = ent
 		}
 		if ret == nil && gt < len(t.Entries) {
-			st, err := t.getSubtree(ctx, s, gt)
+			st, err := t.getSubtreeAt(ctx, s, gt)
 			if err != nil {
 				return nil, err
 			}
@@ -222,31 +192,33 @@ func (t *Tree) MinGt(ctx context.Context, s Read, key []byte) (*TreeEntry, error
 		}
 		return ret, nil
 	default:
-		return nil, errors.New("invalid tree")
+		return nil, errors.New("invalid tree level")
 	}
 }
 
 func (t *Tree) Get(ctx context.Context, s Read, key []byte) (*TreeEntry, error) {
-	i := t.indexGet(key)
-	if i < 0 {
-		return nil, nil
-	}
-
 	switch {
 	case t.Level > 1:
-		subTree, err := t.getSubtree(ctx, s, i)
+		subTree, err := t.getSubtree(ctx, s, key)
 		if err != nil {
+			return nil, err
+		}
+		if subTree == nil {
 			return nil, err
 		}
 		return subTree.Get(ctx, s, key)
 	case t.Level == 1:
+		i := t.indexGet(key)
+		if i < 0 {
+			return nil, nil
+		}
 		ent := t.Entries[i]
 		if bytes.Compare(key, ent.Key) == 0 {
 			return ent, nil
 		}
 		return nil, nil
 	default:
-		return nil, errors.New("Invalid tree level")
+		return nil, errors.New("invalid tree level")
 	}
 }
 
@@ -256,53 +228,20 @@ func (t *Tree) Delete(ctx context.Context, s ReadPost, key []byte) (*Tree, error
 
 func (t *Tree) delete(ctx context.Context, s ReadPost, key []byte) (*Tree, error) {
 	// TODO: not balanced
-	i := t.indexGet(key)
-	if i < 0 {
-		return t, nil
-	}
-
-	newEntries := []*TreeEntry{}
 	switch {
 	case t.Level > 1:
-		subTree, err := t.getSubtree(ctx, s, i)
-		if err != nil {
-			return nil, err
-		}
-
-		newSt, err := subTree.delete(ctx, s, key)
-		if err != nil {
-			return nil, err
-		}
-		ref, err := webref.EncodeAndPost(ctx, s, newSt)
-		if err != nil {
-			return nil, err
-		}
-
-		ent := &TreeEntry{Key: newSt.MinKey(), Ref: ref}
-		newEntries = append(newEntries, t.Entries[:i]...)
-		newEntries = append(newEntries, ent)
-		if i < len(t.Entries)-1 {
-			newEntries = append(newEntries, t.Entries[i+1:]...)
-		}
-
+		return t.replaceSubtree(ctx, s, key, func(x *Tree) (*Tree, error) {
+			return x.delete(ctx, s, key)
+		})
 	case t.Level == 1:
-		for _, ent := range t.Entries {
-			if bytes.Compare(key, ent.Key) != 0 {
-				newEntries = append(newEntries, ent)
-			}
+		t2 := &Tree{
+			Level:   t.Level,
+			Entries: sliceDelete(t.Entries, key),
 		}
-		if len(newEntries) == len(t.Entries) {
-			return t, errors.New("key does not exist")
-		}
+		return t2, nil
 	default:
-		return nil, errors.New("Invalid tree level")
+		return nil, errors.New("invalid tree level")
 	}
-
-	newTree := &Tree{
-		Level:   t.Level,
-		Entries: newEntries,
-	}
-	return newTree, nil
 }
 
 func (t *Tree) MinKey() []byte {
@@ -329,6 +268,45 @@ func (t *Tree) MaxKey(ctx context.Context, s Read) ([]byte, error) {
 	default:
 		return nil, errors.New("invalid tree: level < 1")
 	}
+}
+
+func (t *Tree) replaceSubtree(ctx context.Context, s ReadPost, key []byte, fn func(t *Tree) (*Tree, error)) (*Tree, error) {
+	i := t.indexPut(key)
+	ent := t.Entries[i]
+
+	st := &Tree{}
+	if err := webref.GetAndDecode(ctx, s, *ent.Ref, st); err != nil {
+		return nil, err
+	}
+
+	st2, err := fn(t)
+	if err != nil {
+		return nil, err
+	}
+
+	// check if we need to split
+	codec := webref.GetCodecCtx(ctx)
+	subTrees := []Tree{*st2}
+	if webref.SizeOf(codec, st2) > s.MaxBlobSize() {
+		low, high := st2.split()
+		subTrees = []Tree{low, high}
+	}
+	// we either have one or 2 subtrees, post them all and convert to entries
+	entries := t.Entries
+	for _, st := range subTrees {
+		ref, err := webref.EncodeAndPost(ctx, s, st)
+		if err != nil {
+			return nil, err
+		}
+		stEnt := &TreeEntry{Key: st.MinKey(), Ref: ref}
+		entries = slicePut(entries, stEnt)
+	}
+
+	t2 := &Tree{
+		Level:   t.Level,
+		Entries: entries,
+	}
+	return t2, nil
 }
 
 func merge(a, b Tree) Tree {
@@ -360,7 +338,15 @@ func (t *Tree) split() (low, high Tree) {
 	return low, high
 }
 
-func (t *Tree) getSubtree(ctx context.Context, s Read, i int) (*Tree, error) {
+func (t *Tree) getSubtree(ctx context.Context, s Read, key []byte) (*Tree, error) {
+	i := t.indexGet(key)
+	return t.getSubtreeAt(ctx, s, i)
+}
+
+func (t *Tree) getSubtreeAt(ctx context.Context, s Read, i int) (*Tree, error) {
+	if i < 0 || i >= len(t.Entries) {
+		return nil, nil
+	}
 	ent := t.Entries[i]
 	subtree := &Tree{}
 
@@ -369,4 +355,36 @@ func (t *Tree) getSubtree(ctx context.Context, s Read, i int) (*Tree, error) {
 		return nil, err
 	}
 	return subtree, nil
+}
+
+func slicePut(ents []*TreeEntry, ent2 *TreeEntry) []*TreeEntry {
+	ents2 := []*TreeEntry{}
+
+	i := 0
+	for _, ent := range ents {
+		if bytes.Compare(ent.Key, ent2.Key) < 0 {
+			ents2 = append(ents2, ent)
+			i++
+		} else {
+			break
+		}
+	}
+	ents2 = append(ents2, ent2)
+	for _, ent := range ents[i:] {
+		if bytes.Compare(ent.Key, ent2.Key) > 0 {
+			ents2 = append(ents2, ent)
+		}
+	}
+
+	return ents2
+}
+
+func sliceDelete(ents []*TreeEntry, key []byte) []*TreeEntry {
+	ents2 := []*TreeEntry{}
+	for _, ent := range ents {
+		if bytes.Compare(ent.Key, key) != 0 {
+			ents2 = append(ents2, ent)
+		}
+	}
+	return ents2
 }

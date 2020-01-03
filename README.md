@@ -83,3 +83,8 @@ Contributions are welcome
 ## Non-Goals
 - Create a p2p network based `Store` or `Cell`, which runs in the WebFS process.
 Those should run separately and expose an API which this project will be eager to integrate.
+
+## Community
+Questions and Discussion happening on Matrix.
+
+![Matrix](https://img.shields.io/matrix/webfs:matrix.org?label=%23webfs%3Amatrix.org&logo=matrix)

@@ -24,6 +24,10 @@ type VolSpecMutator func(webfsim.VolumeSpec) webfsim.VolumeSpec
 type VolumeMutator func(webfsim.Commit) (*webfsim.Commit, error)
 type ObjectMutator func(*webfsim.Object) (*webfsim.Object, error)
 
+func IdentityOM(x *webfsim.Object) (*webfsim.Object, error) {
+	return x, nil
+}
+
 type Volume struct {
 	spec  *webfsim.VolumeSpec
 	cell  Cell
@@ -246,9 +250,12 @@ func (v *Volume) ApplyObject(ctx context.Context, fn ObjectMutator) error {
 			return nil, err
 		}
 
-		ref, err := webref.EncodeAndPost(ctx, v.getStore(), o2)
-		if err != nil {
-			return nil, err
+		var ref *webref.Ref
+		if o2 != nil {
+			ref, err = webref.EncodeAndPost(ctx, v.getStore(), o2)
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		next := webfsim.Commit{
@@ -432,8 +439,10 @@ func (v *Volume) getStore() *Store {
 
 func (v *Volume) getOptions() *Options {
 	switch {
-	case v.parent == nil:
+	case v.parent == nil && v.opts != nil:
 		return v.opts
+	case v.parent == nil && v.opts == nil:
+		return DefaultOptions()
 	default:
 		parentOpts := v.parent.getOptions()
 		return MergeOptions(parentOpts, v.opts)

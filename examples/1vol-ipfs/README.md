@@ -9,7 +9,7 @@ $ webfs mkdir /
 $ webfs mkdir mydir
 $ webfs import ./hello.txt hello.txt
 ```
-`superblock.json` was edited to require 1 replica with the "ipfs://" prefix
+`superblock.webfs` was edited to require 1 replica with the "ipfs://" prefix
 ```
 {
   "options": {
@@ -49,10 +49,8 @@ hello world
 Get the URLs for all the blobs in the filesystem
 ```
 $ webfs urldump
-ipfs://QmedPkM6PsjtVCNwag7zmeqRomhau3KCHiW27gxRcaNLWL
-ipfs://QmVkCgNh3ELa1mGfyzZ2vTUwNa2Ahndckb9xDmFbrHYpqD
-ipfs://QmdzinBDW1KSp2HcwKLtk8HfhvXbpvcGBi8dYQZ8GgbNoK
-ipfs://QmXpD7aZEUPG61AN9WxZX7pRKsQ9SPVJEVeQ3jUUfGQywp
-ipfs://QmaMN4MFBFsAeZ5monK2m3dpSPb8M7xVYZagHtNG4jAVGb
-ipfs://QmXpD7aZEUPG61AN9WxZX7pRKsQ9SPVJEVeQ3jUUfGQywp
+ipfs://QmPmdC2fDDvj4QJ6kKL2JRD8QNi1hYDgseK6D61N1NpmoD
+ipfs://QmafqGhTTk2FvXG77A3S8oBUZx784hq1LCAcfq3Pm1Pjhq
+ipfs://QmUGE3tLnh6HDSHuVhQg9H5ECyURLjWiuwDUe3vkLiEzTE
+ipfs://QmcCLcrLUCchMqWhuGb7WFaZXUFieJwGtotL1YzkyDVxnM
 ```

@@ -7,6 +7,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const defaultSuperblockPath = "superblock.webfs"
+
 func init() {
 	newCmd.AddCommand(newFS)
 	rootCmd.AddCommand(newCmd)
@@ -24,11 +26,15 @@ var newFS = &cobra.Command{
 		if len(args) > 0 {
 			p = args[0]
 		}
-		_, err := webfs.NewSuperblock(p)
+		sb, err := webfs.NewSuperblock(p)
 		if err != nil {
 			return err
 		}
 		log.Println("created superblock at", p)
-		return nil
+		wfs, err := webfs.New(sb, nil)
+		if err != nil {
+			return err
+		}
+		return wfs.Sync(ctx)
 	},
 }

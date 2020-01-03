@@ -392,6 +392,10 @@ func (wfs *WebFS) DeleteAt(ctx context.Context, p string, index int) error {
 	return deleteAt(ctx, o.getParent(), o.getName())
 }
 
+func (wfs *WebFS) Sync(ctx context.Context) error {
+	return wfs.root.ApplyObject(ctx, IdentityOM)
+}
+
 func (wfs *WebFS) getStore() *Store {
 	if wfs.baseStore == nil {
 		return nil

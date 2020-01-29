@@ -139,3 +139,17 @@ func Decode(codec string, data []byte, x interface{}) error {
 	}
 	return nil
 }
+
+func (r *Ref) MarshalJSON() ([]byte, error) {
+	m := jsonpb.Marshaler{}
+	buf := &bytes.Buffer{}
+	if err := m.Marshal(buf, r); err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+}
+
+func (r *Ref) UnmarshalJSON(data []byte) error {
+	return jsonpb.Unmarshal(bytes.NewBuffer(data), r)
+}

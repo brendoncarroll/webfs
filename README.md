@@ -9,6 +9,11 @@ my data between traditional storage providers like Dropbox, MEGA, or Google Driv
 If you have ever thought "x can probably be used as a file system", but didn't want to actually write the file system part, WebFS might be of benefit to you.
 You can probably turn x into a file system with WebFS by writing a new `Store` or `Cell` implementation.
 
+## Getting Started
+```shell
+$ webfs mount myvolume.webfs
+```
+
 ## Examples
 There are examples in the `/examples` directory.
 The examples assume you have the `webfs` executable on your `$PATH`.
@@ -63,26 +68,6 @@ WebFS directories are similar to git trees.
 The main difference is that WebFS files and directories do not have one to one mappings with blobs.
 Instead, they are tree structures that span multiple blobs.
 This allows them to support much larger files than is practical in git.
-
-## Goals/Roadmap
-- FUSE Adapter
-- Snapshots. Transform `Volume`s into snapshot objects recursively and output a root snapshot.
-- RAID, Reed-Solomon, Compression `Webref`s
-- Check/Scrub. To repair or move data as needed.
-This will enable easy migrations between storage providers.
-Changing store-A to 0 replicas and store-B to 1 replica and running scrub should be all that's required.
-- Sharded and Union Directories (across multiple cells)
-- Gain adoption by data-curators.
-Become a sound way to distribute large datasets which update over time.
-- Create a simple workflow for group archiving.
-- High quality CLI UX
-- Create a more competitive market for file storage and synchronization, by reducing the problem to implementing a `Store` or `Cell`.
-
-Contributions are welcome
-
-## Non-Goals
-- Create a p2p network based `Store` or `Cell`, which runs in the WebFS process.
-Those should run separately and expose an API which this project will be eager to integrate.
 
 ## Community
 Questions and Discussion happening on Matrix.

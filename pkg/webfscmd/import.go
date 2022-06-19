@@ -12,8 +12,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func init() {
-	rootCmd.AddCommand(importCmd)
+func newImportCmd() *cobra.Command {
+
 }
 
 var importCmd = &cobra.Command{

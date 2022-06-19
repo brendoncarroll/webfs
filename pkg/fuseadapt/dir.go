@@ -123,14 +123,15 @@ func toAttr(finfo webfs.FileInfo) fuse.Attr {
 	return fuse.Attr{
 		Valid: 0,
 
-		Atime: finfo.AccessedAt,
-		Ctime: finfo.CreatedAt,
-		Mtime: finfo.ModifiedAt,
+		Atime:  finfo.AccessedAt,
+		Ctime:  finfo.CreatedAt,
+		Crtime: finfo.CreatedAt, // macOS
+		Mtime:  finfo.ModifiedAt,
 
-		//BlockSize: 512,
-		//Blocks:    finfo.Size / 512,
-		Size: finfo.Size,
-		Mode: finfo.Mode,
+		BlockSize: 512,
+		Blocks:    finfo.Size / 512,
+		Size:      finfo.Size,
+		Mode:      finfo.Mode,
 	}
 }
 

@@ -2,16 +2,17 @@ package ipfsstore
 
 import (
 	"context"
-	"errors"
+	"io"
 
-	"github.com/brendoncarroll/webfs/pkg/stores"
+	"github.com/brendoncarroll/go-state/cadata"
 	ipfsapi "github.com/ipfs/go-ipfs-api"
+	"golang.org/x/crypto/blake2b"
 )
 
 const (
 	MaxBlobSize = 1 << 20 // 1MiB
 
-	DefaultMHType = "sha2-256"
+	DefaultMHType = "blake2b-256"
 	DefaultMHLen  = 32
 
 	DefaultLocalURL    = "http://127.0.0.1:5001"
@@ -19,9 +20,14 @@ const (
 	CloudflareURL      = "https://cloudflare-ipfs.com"
 )
 
-type IPFSStore = stores.ReadPost
+var _ ipfsClient = cadata.Store
 
-func New(u string) IPFSStore {
+type ipfsClient struct {
+	client *ipfsapi.Shell
+	hash   cadata.HashFunc
+}
+
+func New(u string) cadata.Store {
 	if u == "" {
 		u = DefaultLocalURL
 	}
@@ -29,18 +35,18 @@ func New(u string) IPFSStore {
 	return &ipfsClient{client: client}
 }
 
-type ipfsClient struct {
-	client *ipfsapi.Shell
-}
-
-func (s *ipfsClient) Get(ctx context.Context, key string) ([]byte, error) {
-	return s.client.BlockGet(key)
-}
-
-func (s *ipfsClient) Post(ctx context.Context, prefix string, data []byte) (string, error) {
-	if len(prefix) > 0 {
-		return "", errors.New("prefix must be empty")
+func (s *ipfsClient) Get(ctx context.Context, id cadata.ID, buf []byte) (int, error) {
+	data, err := s.client.BlockGet("")
+	if err != nil {
+		return 0, err
 	}
+	if len(buf) < len(data) {
+		return 0, io.ErrShortBuffer
+	}
+	return copy(buf, data), nil
+}
+
+func (s *ipfsClient) Post(ctx context.Context, data []byte) (cadata.ID, error) {
 	var (
 		format = ""
 		mhtype = DefaultMHType
@@ -51,6 +57,18 @@ func (s *ipfsClient) Post(ctx context.Context, prefix string, data []byte) (stri
 		return "", err
 	}
 	return k, nil
+}
+
+func (s *ipfsClient) List(ctx context.Context, span cadata.Span, ids []cadata.ID) (int, error) {
+	panic("not implemented")
+}
+
+func (s *ipfsClient) Delete(ctx context.Context, id cadata.ID) error {
+	panic("not implemented")
+}
+
+func (s *ipfsClient) Hash(x []byte) cadata.ID {
+	return blake2b.Sum256(x)
 }
 
 func (s *ipfsClient) MaxBlobSize() int {

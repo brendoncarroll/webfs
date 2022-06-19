@@ -7,10 +7,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func init() {
-	rootCmd.AddCommand(moveCmd)
-}
-
 var moveCmd = &cobra.Command{
 	Use:   "mv",
 	Short: "Copys the object at args[0] to args[1]",

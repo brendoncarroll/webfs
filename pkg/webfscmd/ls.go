@@ -8,20 +8,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func init() {
-	rootCmd.AddCommand(lsCmd)
-}
-
 var lsHeaders = []string{"PATH", "SIZE", "OBJECT"}
 
 var lsCmd = &cobra.Command{
 	Use:   "ls",
 	Short: "List files and directories",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := setupWfs(); err != nil {
-			return err
-		}
-
 		p := "/"
 		if len(args) > 0 {
 			p = args[0]

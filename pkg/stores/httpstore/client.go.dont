@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/brendoncarroll/go-state/cadata"
 	"github.com/brendoncarroll/webfs/pkg/stores"
 	"github.com/multiformats/go-multihash"
 )
@@ -20,46 +21,24 @@ type HttpStore struct {
 	maxBlobSize int
 	headers     map[string]string
 	hc          *http.Client
-	validateMH  bool
 }
 
-func New(endpoint string, headers map[string]string) *HttpStore {
+func New(endpoint string, hf cadata.HashFunc, maxSize int, headers map[string]string) *HttpStore {
 	s := &HttpStore{
 		endpoint:    endpoint,
 		hc:          http.DefaultClient,
 		headers:     headers,
 		maxBlobSize: -1,
-		validateMH:  true,
 	}
 	return s
 }
 
-func (hs *HttpStore) Init(ctx context.Context) error {
-	mbsURL := hs.endpoint + "/.maxBlobSize"
-	r := hs.newRequest(ctx, http.MethodGet, mbsURL, nil)
-	resp, err := hs.hc.Do(r)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return errorFromRes(resp)
-	}
-
-	if _, err := fmt.Fscanf(resp.Body, "%d", &hs.maxBlobSize); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (hs *HttpStore) Get(ctx context.Context, key string) ([]byte, error) {
-	req := hs.newRequest(ctx, http.MethodGet, hs.getURL(key), nil)
+func (hs *HttpStore) Get(ctx context.Context, id cadata.ID, buf []byte) (int, error) {
+	req := hs.newRequest(ctx, http.MethodGet, hs.getURL(id), nil)
 
 	resp, err := hs.hc.Do(req)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
@@ -67,15 +46,15 @@ func (hs *HttpStore) Get(ctx context.Context, key string) ([]byte, error) {
 		}
 	}()
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, stores.ErrNotFound
+		return 0, stores.ErrNotFound
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, errorFromRes(resp)
+		return 0, errorFromRes(resp)
 	}
 
 	data, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 
 	if hs.validateMH {

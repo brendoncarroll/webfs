@@ -6,10 +6,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func init() {
-	rootCmd.AddCommand(mkdirCmd)
-}
-
 var mkdirCmd = &cobra.Command{
 	Use:   "mkdir",
 	Short: "Makes a new directory",

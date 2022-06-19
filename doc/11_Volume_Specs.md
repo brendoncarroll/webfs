@@ -39,7 +39,7 @@ e.g.
         "http": {
             "url": "http://example.com/cells/1234",
             "headers": {
-                "X-My-Headers": "header-value",
+                "X-My-Header": "header-value",
             }
         }
     }

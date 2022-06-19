@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 
 	"github.com/brendoncarroll/go-state/posixfs"
+	"github.com/brendoncarroll/webfs/pkg/stores/ipfsstore"
 	"github.com/brendoncarroll/webfs/pkg/webfs"
+	ipfsapi "github.com/ipfs/go-ipfs-api"
 	"github.com/spf13/cobra"
 )
 
@@ -40,6 +42,7 @@ func NewRootCmd() *cobra.Command {
 		}
 		opts := []webfs.Option{
 			webfs.WithPosixFS(posixfs.NewDirFS(fsRoot)),
+			webfs.WithIPFS(ipfsapi.NewShell(ipfsstore.CloudflareURL)),
 		}
 		wfs, err = webfs.New(*vs, opts...)
 		return err

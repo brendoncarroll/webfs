@@ -25,11 +25,7 @@ type ipfsClient struct {
 	client *ipfsapi.Shell
 }
 
-func New(u string) cadata.Store {
-	if u == "" {
-		u = DefaultLocalURL
-	}
-	client := ipfsapi.NewShell(u)
+func New(client *ipfsapi.Shell) cadata.Store {
 	return &ipfsClient{client: client}
 }
 

@@ -34,8 +34,9 @@ type Volume struct {
 
 // FS is an instance of a WebFS filesystem
 type FS struct {
-	fs  posixfs.FS
-	log logrus.FieldLogger
+	config *fsConfig
+	fs     posixfs.FS
+	log    logrus.FieldLogger
 
 	root *volumeMount
 }
@@ -46,8 +47,9 @@ func New(vspec VolumeSpec, opts ...Option) (*FS, error) {
 		opt(&config)
 	}
 	fs := &FS{
-		fs:  config.pfs,
-		log: config.log,
+		config: &config,
+		fs:     config.pfs,
+		log:    config.log,
 	}
 	root, err := fs.getVolumeMount(context.Background(), nil, "", &vspec)
 	if err != nil {

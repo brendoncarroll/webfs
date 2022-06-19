@@ -8,6 +8,7 @@ import (
 
 	bcclient "github.com/blobcache/blobcache/client/go_client"
 	"github.com/brendoncarroll/go-state/posixfs"
+	ipfsapi "github.com/ipfs/go-ipfs-api"
 	"github.com/sirupsen/logrus"
 )
 
@@ -16,6 +17,7 @@ type fsConfig struct {
 	pfs               posixfs.FS
 	dialer            TCPDialer
 	blobcacheEndpoint string
+	ipfs              *ipfsapi.Shell
 }
 
 func defaultConfig() fsConfig {
@@ -56,5 +58,11 @@ func WithBlobcache(endpoint string) Option {
 func WithLogger(l logrus.FieldLogger) Option {
 	return func(c *fsConfig) {
 		c.log = l
+	}
+}
+
+func WithIPFS(shell *ipfsapi.Shell) Option {
+	return func(c *fsConfig) {
+		c.ipfs = shell
 	}
 }

@@ -20,6 +20,7 @@ import (
 
 	"github.com/brendoncarroll/webfs/pkg/cells/filecell"
 	"github.com/brendoncarroll/webfs/pkg/cells/gotcells"
+	"github.com/brendoncarroll/webfs/pkg/stores/ipfsstore"
 )
 
 // VolumeSpec is a specification for a Volume.
@@ -87,9 +88,7 @@ type HTTPStoreSpec struct {
 	Headers map[string]string `json:"headers"`
 }
 
-type BlobcacheStoreSpec struct {
-	Handle blobcache.Handle `json:"handle"`
-}
+type BlobcacheStoreSpec struct{}
 
 type IPFSStoreSpec struct{}
 
@@ -165,11 +164,14 @@ func (fs *FS) makeStore(spec StoreSpec) (cadata.Store, error) {
 		pfs := posixfs.NewDirFS(*spec.FS)
 		return fsstore.New(pfs, Hash, MaxBlobSize), nil
 	case spec.Blobcache != nil:
-		c, err := bcclient.NewEnvClient()
+		c, err := bcclient.NewClient(fs.config.blobcacheEndpoint)
 		if err != nil {
 			return nil, err
 		}
-		return blobcache.NewStore(c, spec.Blobcache.Handle), nil
+		// TODO: need to set handle
+		return blobcache.NewStore(c, blobcache.Handle{}), nil
+	case spec.IPFS != nil:
+		return ipfsstore.New(fs.config.ipfs), nil
 	default:
 		return nil, errors.New("empty store spec")
 	}

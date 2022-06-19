@@ -3,7 +3,6 @@ module github.com/brendoncarroll/webfs
 go 1.18
 
 require (
-	bazil.org/fuse v0.0.0-20180421153158-65cc252bf669
 	github.com/blobcache/blobcache v0.0.0-20220615224329-ce25fe33118b
 	github.com/brendoncarroll/go-state v0.0.0-20220617134034-2613fe050888
 	github.com/gotvc/got v0.0.3-0.20220618220735-aa388cfe7f66

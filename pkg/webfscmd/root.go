@@ -3,72 +3,69 @@ package webfscmd
 import (
 	"context"
 	"errors"
-	"log"
-	"os"
+	"io/ioutil"
 	"path/filepath"
-	"strings"
 
+	"github.com/brendoncarroll/go-state/posixfs"
+	"github.com/brendoncarroll/webfs/pkg/stores/ipfsstore"
 	"github.com/brendoncarroll/webfs/pkg/webfs"
+	ipfsapi "github.com/ipfs/go-ipfs-api"
 	"github.com/spf13/cobra"
 )
 
-var (
-	wfs *webfs.WebFS
-	ctx context.Context
-)
-
-var rootCmd = &cobra.Command{
-	Short: "WebFS",
-	Use:   "webfs",
-}
-
 func Execute() error {
-	return rootCmd.Execute()
+	rc := NewRootCmd()
+	return rc.Execute()
 }
 
-func setupWfs() (err error) {
-	sbs, err := listSuperblocks()
-	if err != nil {
-		return err
+func NewRootCmd() *cobra.Command {
+	rootCmd := &cobra.Command{
+		Short: "WebFS",
+		Use:   "webfs",
 	}
-	var superblockPath string
-	switch {
-	case len(sbs) > 1:
-		for _, p := range sbs {
-			log.Println(p)
+	rootPath := rootCmd.PersistentFlags().StringP("root", "r", "", "-r root.webfs")
+	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		if *rootPath == "" {
+			return errors.New("must provide a root")
 		}
-		return errors.New("found multiple superblocks")
-	case len(sbs) < 1:
-		return errors.New("no webfs superblocks found")
-	default:
-		log.Printf(`using "%s" as superblock`, sbs[0])
-		superblockPath = sbs[0]
+		data, err := ioutil.ReadFile(*rootPath)
+		if err != nil {
+			return err
+		}
+		vs, err := webfs.ParseVolumeSpec(data)
+		if err != nil {
+			return err
+		}
+		fsRoot, err := filepath.Abs(".")
+		if err != nil {
+			return err
+		}
+		opts := []webfs.Option{
+			webfs.WithPosixFS(posixfs.NewDirFS(fsRoot)),
+			webfs.WithIPFS(ipfsapi.NewShell(ipfsstore.CloudflareURL)),
+		}
+		wfs, err = webfs.New(*vs, opts...)
+		return err
 	}
 
-	sb := webfs.SuperblockFromPath(superblockPath)
-	wfs, err = webfs.New(sb, nil)
-	if err != nil {
-		return err
+	for _, c := range []*cobra.Command{
+		newCatCmd(),
+		newHTTPCmd(),
+		newEditCmd(),
+		newAddCmd(),
+		newLsCmd(),
+		newMkDirCmd(),
+		newRmCmd(),
+		newTouchCmd(),
+		newMountCmd(),
+		newMvCmd(),
+	} {
+		rootCmd.AddCommand(c)
 	}
+	return rootCmd
+}
+
+var (
 	ctx = context.Background()
-	return nil
-}
-
-func listSuperblocks() ([]string, error) {
-	f, err := os.Open(".")
-	if err != nil {
-		return nil, err
-	}
-	names, err := f.Readdirnames(-1)
-	if err != nil {
-		return nil, err
-	}
-	sbs := []string{}
-	for _, name := range names {
-		ext := filepath.Ext(name)
-		if strings.ToLower(ext) == ".webfs" {
-			sbs = append(sbs, name)
-		}
-	}
-	return sbs, nil
-}
+	wfs *webfs.FS
+)

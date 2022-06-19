@@ -1,0 +1,23 @@
+package httpstore
+
+import (
+	"context"
+	mrand "math/rand"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestStore(t *testing.T) {
+	storetest.TestStore(t, func(t testing.TB) cadata.Store {
+		ctx := context.Background()
+		s, err := NewServer("127.0.0.1:", 4096)
+		require.NoError(t, err)
+
+		c := New(s.GetURL(), nil)
+		err = c.Init(ctx)
+		require.NoError(t, err)
+		return s
+	})
+}

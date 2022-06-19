@@ -3,61 +3,53 @@ package filecell
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"io/ioutil"
 	"sync"
-)
 
-type Spec struct {
-	Path string
-}
+	"github.com/brendoncarroll/go-state/posixfs"
+)
 
 type Cell struct {
 	mu sync.Mutex
+	fs posixfs.FS
 	p  string
 }
 
-func New(p string) *Cell {
-	c := &Cell{p: p}
+func New(pfs posixfs.FS, p string) *Cell {
+	c := &Cell{fs: pfs, p: p}
 	return c
 }
 
-func (c *Cell) URL() string {
-	return "file://" + c.p
-}
-
-func (c *Cell) Get(ctx context.Context) ([]byte, error) {
+func (c *Cell) Read(ctx context.Context, buf []byte) (int, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return ioutil.ReadFile(c.p)
-}
-
-func (c *Cell) CAS(ctx context.Context, cur, next []byte) (bool, error) {
-	next = reformat(next)
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	data, err := ioutil.ReadFile(c.p)
-	if err != nil {
-		return false, err
+	data, err := posixfs.ReadFile(ctx, c.fs, c.p)
+	if err != nil && !posixfs.IsErrNotExist(err) {
+		return 0, err
 	}
+	return copy(buf, data), nil
+}
 
-	if bytes.Compare(cur, data) == 0 {
+func (c *Cell) CAS(ctx context.Context, actual, prev, next []byte) (bool, int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	data, err := posixfs.ReadFile(ctx, c.fs, c.p)
+	if err != nil && !posixfs.IsErrNotExist(err) {
+		return false, 0, err
+	}
+	var swapped bool
+	if bytes.Equal(prev, data) {
 		if err := ioutil.WriteFile(c.p, next, 0644); err != nil {
-			return false, err
+			return false, 0, err
 		}
-		return true, nil
+		swapped = true
+		data = next
+	} else {
+		swapped = false
 	}
-
-	return false, nil
+	return swapped, copy(actual, data), nil
 }
 
-func reformat(x []byte) []byte {
-	var v map[string]interface{}
-	if err := json.Unmarshal(x, &v); err != nil {
-		panic(err)
-		return x
-	}
-	y, _ := json.MarshalIndent(v, "", "  ")
-	return y
+func (c *Cell) MaxSize() int {
+	return 1 << 16
 }

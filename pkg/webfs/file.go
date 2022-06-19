@@ -1,207 +1,139 @@
 package webfs
 
 import (
-	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	iofs "io/fs"
 	"time"
 
-	"github.com/brendoncarroll/webfs/pkg/webfsim"
-	"github.com/brendoncarroll/webfs/pkg/webref"
-	"github.com/brendoncarroll/webfs/pkg/wrds"
-	"github.com/golang/protobuf/jsonpb"
+	"github.com/brendoncarroll/go-state/posixfs"
 )
 
-type FileMutator func(cur webfsim.File) (*webfsim.File, error)
-
-func IdentityFM(cur webfsim.File) (*webfsim.File, error) {
-	return &cur, nil
-}
+var (
+	_ io.Reader   = &File{}
+	_ io.ReaderAt = &File{}
+)
 
 type File struct {
-	m webfsim.File
+	vol  *volumeMount
+	path string
 
-	baseObject
+	ctx    context.Context
+	offset int64
 }
 
-func newFile(ctx context.Context, parent Object, name string) (*File, error) {
-	f := &File{
-		m: webfsim.File{Tree: wrds.NewTree()},
-		baseObject: baseObject{
-			parent:       parent,
-			nameInParent: name,
-		},
+func newFile(vol *volumeMount, path string) *File {
+	return &File{
+		vol:  vol,
+		path: path,
+		ctx:  context.Background(),
 	}
-
-	if err := f.SetData(ctx, nil); err != nil {
-		return nil, err
-	}
-	return f, nil
 }
 
-func (f *File) SetData(ctx context.Context, r io.Reader) error {
-	if r == nil {
-		r = &bytes.Buffer{}
-	}
-	store := f.getStore()
-
-	opts := f.getOptions()
-	ctx = webref.SetCodecCtx(ctx, opts.DataOpts.Codec)
-
-	m, err := webfsim.FileFromReader(ctx, store, r)
-	if err != nil {
-		return err
-	}
-
-	// This is a total replace not a modification of existing content.
-	return f.Apply(ctx, func(cur webfsim.File) (*webfsim.File, error) {
-		return m, nil
-	})
-}
-
-func (f *File) GetAtPath(ctx context.Context, p Path, objs []Object, n int) ([]Object, error) {
-	if len(p) == 0 {
-		objs = append(objs, f)
-		return objs, nil
-	}
-	return nil, errors.New("cannot lookup in file")
-}
-
-func (f *File) Lookup(ctx context.Context, p Path) (Object, error) {
-	if len(p) == 0 {
-		return f, nil
-	}
-	return nil, errors.New("cannot lookup in file")
-}
-
-func (f *File) Walk(ctx context.Context, fn func(Object) bool) (bool, error) {
-	cont := fn(f)
-	return cont, nil
-}
-
-func (f *File) ReadAt(p []byte, off int64) (n int, err error) {
-	ctx := context.TODO()
-	offset := uint64(off)
-	return webfsim.FileReadAt(ctx, f.getStore(), f.m, offset, p)
-}
-
-func (f *File) WriteAt(p []byte, off int64) (n int, err error) {
-	ctx := context.TODO()
-	opts := f.getOptions()
-	ctx = webref.SetCodecCtx(ctx, opts.DataOpts.Codec)
-
-	err = f.Apply(ctx, func(x webfsim.File) (*webfsim.File, error) {
-		return &x, errors.New("File.WriteAt not implemented")
-	})
-	if err != nil {
+func (f *File) Read(p []byte) (int, error) {
+	n, err := f.ReadAt(p, f.offset)
+	if err != nil && !errors.Is(err, io.EOF) {
 		return 0, err
 	}
+	f.offset += int64(n)
 	return n, err
 }
 
-func (f *File) Append(p []byte) error {
-	ctx := context.TODO()
-	newFile, err := webfsim.FileAppend(ctx, f.getStore(), f.m, p)
+func (f *File) ReadAt(buf []byte, offset int64) (int, error) {
+	root, err := readRoot(f.ctx, f.vol.vol.Cell)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	f.m = *newFile
+	if root == nil {
+		return 0, iofs.ErrNotExist
+	}
+	if offset < 0 {
+		return 0, fmt.Errorf("invalid offset %d", offset)
+	}
+	s := f.vol.vol.Store
+	return f.vol.gotfs.ReadFileAt(f.ctx, s, s, *root, f.path, uint64(offset), buf)
+}
+
+func (f *File) Stat() (iofs.FileInfo, error) {
+	return f.vol.Stat(f.ctx, f.path)
+}
+
+func (f *File) Sync() error {
 	return nil
 }
 
-func (f *File) Size() uint64 {
-	return f.m.Size
+func (f *File) ReadDir(n int) (ret []iofs.DirEntry, _ error) {
+	return f.vol.readDir(f.ctx, f.path, n)
 }
 
-func (f File) String() string {
-	return "File{}"
-}
-
-func (f File) Describe() string {
-	m := jsonpb.Marshaler{
-		Indent: " ",
-	}
-	o := &webfsim.Object{
-		Value: &webfsim.Object_File{&f.m},
-	}
-	s, err := m.MarshalToString(o)
-	if err != nil {
-		panic(err)
-	}
-	return s
-}
-
-func (f File) FileInfo() FileInfo {
-	t := time.Now().AddDate(0, 0, -1)
-	return FileInfo{
-		CreatedAt:  t,
-		ModifiedAt: t,
-		AccessedAt: t,
-		Mode:       0644,
-		Size:       f.Size(),
-	}
-}
-
-func (f *File) RefIter(ctx context.Context, fn func(webref.Ref) bool) (bool, error) {
-	return refIterTree(ctx, f.getStore(), f.m.Tree, fn)
-}
-
-func (f *File) Sync(ctx context.Context) error {
-	return f.Apply(ctx, func(cur webfsim.File) (*webfsim.File, error) {
-		return &f.m, nil
-	})
-}
-
-func (f *File) Apply(ctx context.Context, fn FileMutator) error {
-	var (
-		newFile *webfsim.File
-		err     error
-	)
-
-	err = apply(ctx, f.parent, f.nameInParent, func(cur *webfsim.Object) (*webfsim.Object, error) {
-		curFile := f.m
-		if cur != nil {
-			of, ok := cur.Value.(*webfsim.Object_File)
-			if ok {
-				curFile = *of.File
-			}
-		}
-
-		newFile, err = fn(curFile)
-		if err != nil {
-			return nil, err
-		}
-		return &webfsim.Object{
-			Value: &webfsim.Object_File{
-				File: newFile,
-			},
-		}, nil
-	})
-	if err != nil {
-		return err
-	}
-
-	f.m = *newFile
+func (f *File) Close() error {
 	return nil
 }
 
-func refIterTree(ctx context.Context, store webref.Getter, t *wrds.Tree, f func(webref.Ref) bool) (bool, error) {
-	iter, err := t.Iterate(ctx, store, nil)
-	if err != nil {
-		return false, err
-	}
+type fileInfo struct {
+	name    string
+	mode    iofs.FileMode
+	size    int64
+	modTime time.Time
+}
 
-	cont := true
-	for cont {
-		entry, err := iter.Next(ctx)
-		if err != nil {
-			return false, err
-		}
-		if entry == nil {
-			return true, nil
-		}
-		cont = f(*entry.Ref)
+func (fi fileInfo) Name() string {
+	return fi.name
+}
+
+func (fi fileInfo) Size() int64 {
+	return fi.size
+}
+
+func (fi fileInfo) Mode() iofs.FileMode {
+	return fi.mode
+}
+
+func (fi fileInfo) IsDir() bool {
+	return fi.mode.IsDir()
+}
+
+func (fi fileInfo) ModTime() time.Time {
+	return fi.modTime
+}
+
+func (fi fileInfo) Sys() any {
+	return nil
+}
+
+var _ iofs.DirEntry = &dirEntry{}
+
+type dirEntry struct {
+	name    string
+	mode    iofs.FileMode
+	getInfo func() (*fileInfo, error)
+}
+
+func (de *dirEntry) Name() string {
+	return de.name
+}
+
+func (de *dirEntry) IsDir() bool {
+	return de.mode.IsDir()
+}
+
+func (de *dirEntry) Type() iofs.FileMode {
+	return de.mode.Type()
+}
+
+func (de *dirEntry) Info() (iofs.FileInfo, error) {
+	return de.getInfo()
+}
+
+func convertError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, posixfs.ErrNotExist):
+		return iofs.ErrNotExist
+	default:
+		return err
 	}
-	return cont, nil
 }

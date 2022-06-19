@@ -1,15 +1,20 @@
 package webfs
 
 import (
-	"errors"
-	"os"
+	"fmt"
 )
 
-var (
-	ErrNotExist = os.ErrNotExist
+// ErrBadConfig is returned when WebFS encounters an invalid config which it cannot mount.
+type ErrBadConfig struct {
+	Path  string
+	Data  []byte
+	Inner error
+}
 
-	ErrObjectType        = errors.New("invalid object type")
-	ErrDuplicateVolumeID = errors.New("duplicate volume id")
+func (e ErrBadConfig) Cause() error {
+	return e.Inner
+}
 
-	ErrConcurrentMod = errors.New("the object was removed or replaced with an object of another type")
-)
+func (e ErrBadConfig) Error() string {
+	return fmt.Sprintf("bad webfs config at path %q. data=%q error=%v", e.Path, e.Data, e.Inner)
+}

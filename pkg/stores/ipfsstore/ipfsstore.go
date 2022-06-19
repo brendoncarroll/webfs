@@ -2,16 +2,18 @@ package ipfsstore
 
 import (
 	"context"
-	"errors"
+	"io"
 
-	"github.com/brendoncarroll/webfs/pkg/stores"
+	"github.com/brendoncarroll/go-state/cadata"
 	ipfsapi "github.com/ipfs/go-ipfs-api"
+	"github.com/multiformats/go-multihash"
+	"golang.org/x/crypto/blake2b"
 )
 
 const (
 	MaxBlobSize = 1 << 20 // 1MiB
 
-	DefaultMHType = "sha2-256"
+	DefaultMHType = "blake2b-256"
 	DefaultMHLen  = 32
 
 	DefaultLocalURL    = "http://127.0.0.1:5001"
@@ -19,28 +21,26 @@ const (
 	CloudflareURL      = "https://cloudflare-ipfs.com"
 )
 
-type IPFSStore = stores.ReadPost
-
-func New(u string) IPFSStore {
-	if u == "" {
-		u = DefaultLocalURL
-	}
-	client := ipfsapi.NewShell(u)
-	return &ipfsClient{client: client}
-}
-
 type ipfsClient struct {
 	client *ipfsapi.Shell
 }
 
-func (s *ipfsClient) Get(ctx context.Context, key string) ([]byte, error) {
-	return s.client.BlockGet(key)
+func New(client *ipfsapi.Shell) cadata.Store {
+	return &ipfsClient{client: client}
 }
 
-func (s *ipfsClient) Post(ctx context.Context, prefix string, data []byte) (string, error) {
-	if len(prefix) > 0 {
-		return "", errors.New("prefix must be empty")
+func (s *ipfsClient) Get(ctx context.Context, id cadata.ID, buf []byte) (int, error) {
+	data, err := s.client.BlockGet("")
+	if err != nil {
+		return 0, err
 	}
+	if len(buf) < len(data) {
+		return 0, io.ErrShortBuffer
+	}
+	return copy(buf, data), nil
+}
+
+func (s *ipfsClient) Post(ctx context.Context, data []byte) (cadata.ID, error) {
 	var (
 		format = ""
 		mhtype = DefaultMHType
@@ -48,11 +48,27 @@ func (s *ipfsClient) Post(ctx context.Context, prefix string, data []byte) (stri
 	)
 	k, err := s.client.BlockPut(data, format, mhtype, mhlen)
 	if err != nil {
-		return "", err
+		return cadata.ID{}, err
 	}
-	return k, nil
+	mh, err := multihash.Decode([]byte(k))
+	if err != nil {
+		return cadata.ID{}, err
+	}
+	return cadata.IDFromBytes(mh.Digest), nil
 }
 
-func (s *ipfsClient) MaxBlobSize() int {
+func (s *ipfsClient) List(ctx context.Context, span cadata.Span, ids []cadata.ID) (int, error) {
+	panic("not implemented")
+}
+
+func (s *ipfsClient) Delete(ctx context.Context, id cadata.ID) error {
+	panic("not implemented")
+}
+
+func (s *ipfsClient) Hash(x []byte) cadata.ID {
+	return blake2b.Sum256(x)
+}
+
+func (s *ipfsClient) MaxSize() int {
 	return MaxBlobSize
 }

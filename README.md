@@ -2,16 +2,42 @@
 
 WebFS is a filesystem built on top of the web.
 
-This project started after looking for a way to use IPFS as a Dropbox replacement,
+WebFS started after looking for a way to use IPFS as a Dropbox replacement,
 and not finding any really solid solutions.  I also wanted to be able to fluidly move
 my data between traditional storage providers like Dropbox, MEGA, or Google Drive while testing the waters of new p2p storage systems, like Swarm or Filecoin.
 
 If you have ever thought "x can probably be used as a file system", but didn't want to actually write the file system part, WebFS might be of benefit to you.
 You can probably turn x into a file system with WebFS by writing a new `Store` or `Cell` implementation.
 
+## Quick Links
+[CLI Docs](./doc/10_CLI.md)
+
+[Volume Specs Docs](./doc/11_Volume_Specs.md)
+
+[ARCHITECTURE.md](./ARCHITECTURE.md)
+
+## Installation
+Installs to `$GOPATH/bin` with `make install`
+
 ## Getting Started
+A simple volume spec using the filesystem for storage
+
+```json
+{
+    "cell": {
+        "file": "CELL_DATA",
+    },
+    "store": {
+        "fs": "BLOBS",
+    }
+}
+```
+This configuration will create and write to a file `./CELL_DATA` and a directory `./BLOBS`, so plan accordingly.
+
+To serve the files over http
 ```shell
-$ webfs mount myvolume.webfs
+$ webfs http --root myvolume.webfs
+  serving at http://127.0.0.1:7007
 ```
 
 ## Examples
@@ -20,54 +46,6 @@ The examples assume you have the `webfs` executable on your `$PATH`.
 
 You can also use
 ```go run ../../cmd/webfs``` instead of ```webfs``` if you don't want to set that up.
-
-## Architecture
-WebFS depends on two interfaces: `Stores` and `Cells`.
-
-### Stores
-Stores support two operations:
-```
-Get(key string) (data []byte, err error)
-Post(prefix string, data []byte) (key string, err error)
-```
-Stores must guarantee fidelity of the data.
-The key given by the store should be related to the data cryptographically.
-For example, an FTP server would make a fine store, provided the files are named with the hash of their contents.
-IPFS paths provide this guarentee.
-
-Store implementations can be found in `pkg/stores`
-
-### Cells
-Cells in WebFS are like cells in a spreadsheet, a holder of a data which can change over time.
-The compare-and-swap operation (`CAS(current, next)`) allows writes which will be synchronized with other WebFS instances writing to the same cell.
-
-Cells provide two operations:
-```
-Get() (data []byte, err error)
-CAS(current, next []byte) (success bool, err error)
-```
-
-Cell implementations can be found in `pkg/cells`
-
-### Data Model
-WebFS takes a typical copy-on-write merkle tree approach similar to git or IPFS.  There are 3 objects that make up the data model.
-
-- Files.  Just a btree from file offsets to data.
-- Directories. A btree from strings to other WebFS objects.
-- Volumes. An authority on part of the file system.
-The contents of volumes are mutable and they can contain any other WebFS object.
-Volumes will be invisible to a client of the file system, and can only be manipulated with the WebFS tooling.
-A Volume wraps a cell implementation.
-
-All of the configuration in WebFS is modelled as objects in the file system.
-Everything needed to start a WebFS instance is contained a file called the "superblock".
-The superblock is just a `Cell` implemented as a single file on disk.
-
-The model is analagous to a web of git repositories/submodules (similar to WebFS volumes).
-WebFS directories are similar to git trees.
-The main difference is that WebFS files and directories do not have one to one mappings with blobs.
-Instead, they are tree structures that span multiple blobs.
-This allows them to support much larger files than is practical in git.
 
 ## Community
 Questions and Discussion happening on Matrix.

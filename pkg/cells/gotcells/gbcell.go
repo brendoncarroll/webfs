@@ -1,4 +1,4 @@
-package gbcell
+package gotcells
 
 import (
 	"context"
@@ -10,21 +10,21 @@ import (
 	"github.com/gotvc/got/pkg/gotvc"
 )
 
-type Cell struct {
+type BranchCell struct {
 	inner   cells.Cell
 	gotvc   *gotvc.Operator
 	vcStore cadata.Store
 }
 
-func New(inner cells.Cell, vcop *gotvc.Operator, vcStore cadata.Store) *Cell {
-	return &Cell{
+func NewBranch(inner cells.Cell, vcop *gotvc.Operator, vcStore cadata.Store) *BranchCell {
+	return &BranchCell{
 		inner:   inner,
 		gotvc:   vcop,
 		vcStore: vcStore,
 	}
 }
 
-func (c *Cell) Read(ctx context.Context, buf []byte) (int, error) {
+func (c *BranchCell) Read(ctx context.Context, buf []byte) (int, error) {
 	n, err := c.inner.Read(ctx, buf)
 	if err != nil {
 		return 0, err
@@ -43,10 +43,10 @@ func (c *Cell) Read(ctx context.Context, buf []byte) (int, error) {
 	return copy(buf, data), nil
 }
 
-func (c *Cell) CAS(ctx context.Context, actual, prev, next []byte) (bool, int, error) {
+func (c *BranchCell) CAS(ctx context.Context, actual, prev, next []byte) (bool, int, error) {
 	return false, 0, errors.New("writing to got branches not yet supported")
 }
 
-func (c *Cell) MaxSize() int {
+func (c *BranchCell) MaxSize() int {
 	return 1 << 10
 }

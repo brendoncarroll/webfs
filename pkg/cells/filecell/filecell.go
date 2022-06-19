@@ -11,19 +11,20 @@ import (
 
 type Cell struct {
 	mu sync.Mutex
+	fs posixfs.FS
 	p  string
 }
 
 func New(pfs posixfs.FS, p string) *Cell {
-	c := &Cell{p: p}
+	c := &Cell{fs: pfs, p: p}
 	return c
 }
 
 func (c *Cell) Read(ctx context.Context, buf []byte) (int, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	data, err := ioutil.ReadFile(c.p)
-	if err != nil {
+	data, err := posixfs.ReadFile(ctx, c.fs, c.p)
+	if err != nil && !posixfs.IsErrNotExist(err) {
 		return 0, err
 	}
 	return copy(buf, data), nil
@@ -32,8 +33,8 @@ func (c *Cell) Read(ctx context.Context, buf []byte) (int, error) {
 func (c *Cell) CAS(ctx context.Context, actual, prev, next []byte) (bool, int, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	data, err := ioutil.ReadFile(c.p)
-	if err != nil {
+	data, err := posixfs.ReadFile(ctx, c.fs, c.p)
+	if err != nil && !posixfs.IsErrNotExist(err) {
 		return false, 0, err
 	}
 	var swapped bool

@@ -6,6 +6,7 @@ import (
 
 	"github.com/brendoncarroll/go-state/cadata"
 	ipfsapi "github.com/ipfs/go-ipfs-api"
+	"github.com/multiformats/go-multihash"
 	"golang.org/x/crypto/blake2b"
 )
 
@@ -20,11 +21,8 @@ const (
 	CloudflareURL      = "https://cloudflare-ipfs.com"
 )
 
-var _ ipfsClient = cadata.Store
-
 type ipfsClient struct {
 	client *ipfsapi.Shell
-	hash   cadata.HashFunc
 }
 
 func New(u string) cadata.Store {
@@ -54,9 +52,13 @@ func (s *ipfsClient) Post(ctx context.Context, data []byte) (cadata.ID, error) {
 	)
 	k, err := s.client.BlockPut(data, format, mhtype, mhlen)
 	if err != nil {
-		return "", err
+		return cadata.ID{}, err
 	}
-	return k, nil
+	mh, err := multihash.Decode([]byte(k))
+	if err != nil {
+		return cadata.ID{}, err
+	}
+	return cadata.IDFromBytes(mh.Digest), nil
 }
 
 func (s *ipfsClient) List(ctx context.Context, span cadata.Span, ids []cadata.ID) (int, error) {
@@ -71,6 +73,6 @@ func (s *ipfsClient) Hash(x []byte) cadata.ID {
 	return blake2b.Sum256(x)
 }
 
-func (s *ipfsClient) MaxBlobSize() int {
+func (s *ipfsClient) MaxSize() int {
 	return MaxBlobSize
 }

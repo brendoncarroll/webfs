@@ -19,7 +19,7 @@ import (
 	"golang.org/x/crypto/chacha20poly1305"
 
 	"github.com/brendoncarroll/webfs/pkg/cells/filecell"
-	"github.com/brendoncarroll/webfs/pkg/cells/gbcell"
+	"github.com/brendoncarroll/webfs/pkg/cells/gotcells"
 )
 
 // VolumeSpec is a specification for a Volume.
@@ -49,8 +49,10 @@ func MarshalVolumeSpec(x VolumeSpec) ([]byte, error) {
 
 // CellSpec is a specification for a Cell
 type CellSpec struct {
-	File *string       `json:"file,omitempty"`
-	HTTP *HTTPCellSpec `json:"http,omitempty"`
+	Memory  *struct{}       `json:"memory,omitempty"`
+	File    *string         `json:"file,omitempty"`
+	HTTP    *HTTPCellSpec   `json:"http,omitempty"`
+	Literal json.RawMessage `json:"literal,omitempty"`
 
 	AEAD      *AEADCellSpec      `json:"aead,omitempty"`
 	GotBranch *GotBranchCellSpec `json:"got_branch,omitempty"`
@@ -73,9 +75,16 @@ type GotBranchCellSpec struct {
 }
 
 type StoreSpec struct {
+	Memory    *struct{}           `json:"memory,omitempty"`
 	FS        *string             `json:"fs,omitempty"`
+	HTTP      HTTPStoreSpec       `json:"http,omitempty"`
 	Blobcache *BlobcacheStoreSpec `json:"blobcache,omitempty"`
 	IPFS      *IPFSStoreSpec      `json:"ipfs,omitempty"`
+}
+
+type HTTPStoreSpec struct {
+	URL     string            `json:"url"`
+	Headers map[string]string `json:"headers"`
 }
 
 type BlobcacheStoreSpec struct {
@@ -101,6 +110,8 @@ func (fs *FS) makeVolume(spec VolumeSpec) (*Volume, error) {
 
 func (fs *FS) makeCell(spec CellSpec) (cells.Cell, error) {
 	switch {
+	case spec.Memory != nil:
+		return cells.NewMem(1 << 16), nil
 	case spec.File != nil:
 		return filecell.New(fs.fs, *spec.File), nil
 	case spec.HTTP != nil:
@@ -108,6 +119,8 @@ func (fs *FS) makeCell(spec CellSpec) (cells.Cell, error) {
 			URL:     spec.HTTP.URL,
 			Headers: spec.HTTP.Headers,
 		}), nil
+	case spec.Literal != nil:
+		panic("not implemented")
 
 	case spec.AEAD != nil:
 		inner, err := fs.makeCell(spec.AEAD.Inner)
@@ -135,7 +148,7 @@ func (fs *FS) makeCell(spec CellSpec) (cells.Cell, error) {
 		// if err != nil {
 		// 	return nil, err
 		// }
-		return gbcell.New(inner, nil, nil), nil
+		return gotcells.NewBranch(inner, nil, nil), nil
 	default:
 		return nil, errors.New("empty cell spec")
 	}
@@ -143,6 +156,8 @@ func (fs *FS) makeCell(spec CellSpec) (cells.Cell, error) {
 
 func (fs *FS) makeStore(spec StoreSpec) (cadata.Store, error) {
 	switch {
+	case spec.Memory != nil:
+		return cadata.NewMem(Hash, MaxBlobSize), nil
 	case spec.FS != nil:
 		if err := os.MkdirAll(*spec.FS, 0o755); err != nil {
 			return nil, err

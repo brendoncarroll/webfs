@@ -40,20 +40,21 @@ type FS struct {
 	root *volumeMount
 }
 
-func New(vol Volume, opts ...Option) (*FS, error) {
+func New(vspec VolumeSpec, opts ...Option) (*FS, error) {
 	config := defaultConfig()
 	for _, opt := range opts {
 		opt(&config)
 	}
-	root := &volumeMount{
-		vol:   vol,
-		gotfs: gotfs.NewOperator(),
+	fs := &FS{
+		fs:  config.pfs,
+		log: config.log,
 	}
-	return &FS{
-		fs:   config.pfs,
-		log:  config.log,
-		root: root,
-	}, nil
+	root, err := fs.getVolumeMount(context.Background(), nil, "", &vspec)
+	if err != nil {
+		return nil, err
+	}
+	fs.root = root
+	return fs, nil
 }
 
 func (fs *FS) Open(ctx context.Context, p string) (*File, error) {
@@ -62,7 +63,7 @@ func (fs *FS) Open(ctx context.Context, p string) (*File, error) {
 		return nil, err
 	}
 	fs.log.Infof("open %q", p)
-	return res.VolumeMount.Open(res.Path)
+	return res.VM.Open(res.Path)
 }
 
 func (fs *FS) PutFile(ctx context.Context, p string, r io.Reader) error {
@@ -70,15 +71,23 @@ func (fs *FS) PutFile(ctx context.Context, p string, r io.Reader) error {
 	if err != nil {
 		return err
 	}
-	return res.VolumeMount.PutFile(ctx, res.Path, r)
+	return res.VM.PutFile(ctx, res.Path, r)
 }
 
-func (fs *FS) Rm(ctx context.Context, p string) error {
+func (fs *FS) Mkdir(ctx context.Context, p string) error {
 	res, err := fs.resolve(ctx, fs.root, p)
 	if err != nil {
 		return err
 	}
-	return res.VolumeMount.Rm(ctx, p)
+	return res.VM.Mkdir(ctx, res.Path)
+}
+
+func (fs *FS) Remove(ctx context.Context, p string) error {
+	res, err := fs.resolve(ctx, fs.root, p)
+	if err != nil {
+		return err
+	}
+	return res.VM.Rm(ctx, p)
 }
 
 func (fs *FS) Cat(ctx context.Context, p string, w io.Writer) error {
@@ -125,8 +134,8 @@ func (fs *FS) getVolumeMount(ctx context.Context, parent *volumeMount, p string,
 }
 
 type resolveRes struct {
-	VolumeMount *volumeMount
-	Path        string
+	VM   *volumeMount
+	Path string
 }
 
 func (fs *FS) resolve(ctx context.Context, vm *volumeMount, p string) (*resolveRes, error) {
@@ -154,8 +163,8 @@ func (fs *FS) resolve(ctx context.Context, vm *volumeMount, p string) (*resolveR
 		}
 	}
 	return &resolveRes{
-		VolumeMount: vm,
-		Path:        p,
+		VM:   vm,
+		Path: p,
 	}, nil
 }
 
@@ -225,6 +234,21 @@ func (v *volumeMount) Stat(ctx context.Context, p string) (iofs.FileInfo, error)
 		return nil, iofs.ErrNotExist
 	}
 	return v.stat(ctx, *root, p)
+}
+
+func (v *volumeMount) Mkdir(ctx context.Context, p string) error {
+	p = cleanPath(p)
+	ms := v.vol.Store
+	return modifyRoot(ctx, v.vol.Cell, func(root *gotfs.Root) (*gotfs.Root, error) {
+		var err error
+		if root == nil {
+			root, err = v.gotfs.NewEmpty(ctx, ms)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return v.gotfs.MkdirAll(ctx, ms, *root, p)
+	})
 }
 
 func (v *volumeMount) readDir(ctx context.Context, p string, n int) (ret []iofs.DirEntry, _ error) {
@@ -332,11 +356,12 @@ func parentOf(x string) string {
 func potConfigPaths(p string) (ret []string) {
 	p = cleanPath(p)
 	parts := strings.Split(p, "/")
-	for _, x := range parts {
+	for i, x := range parts {
 		if x == "" {
 			continue
 		}
-		ret = append(ret, x+".webfs")
+		configPath := strings.Join(parts[:i+1], "/") + ".webfs"
+		ret = append(ret, configPath)
 	}
 	return ret
 }

@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brendoncarroll/go-state/cadata"
-	"github.com/brendoncarroll/go-state/cells"
 	"github.com/stretchr/testify/require"
 )
 
@@ -15,9 +13,9 @@ func TestPotConfigPaths(t *testing.T) {
 	pcps := potConfigPaths("a/b/c/d")
 	require.Equal(t, []string{
 		"a.webfs",
-		"b.webfs",
-		"c.webfs",
-		"d.webfs",
+		"a/b.webfs",
+		"a/b/c.webfs",
+		"a/b/c/d.webfs",
 	}, pcps)
 
 	pcps = potConfigPaths("a")
@@ -44,9 +42,9 @@ func TestPutCat(t *testing.T) {
 }
 
 func newTestWebFS(t testing.TB) *FS {
-	fs, err := New(Volume{
-		Cell:  cells.NewMem(1 << 16),
-		Store: cadata.NewMem(Hash, MaxBlobSize),
+	fs, err := New(VolumeSpec{
+		Cell:  CellSpec{Memory: &struct{}{}},
+		Store: StoreSpec{Memory: &struct{}{}},
 	})
 	require.NoError(t, err)
 	return fs

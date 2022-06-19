@@ -11,8 +11,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-type TCPDialer = func(context.Context, string) (net.Conn, error)
-
 type fsConfig struct {
 	log               logrus.FieldLogger
 	pfs               posixfs.FS
@@ -31,12 +29,14 @@ func defaultConfig() fsConfig {
 // Option is used to configure a WebFS instance.
 type Option func(c *fsConfig)
 
-// WithPOSIXFS sets x as the filesystem to use for file backed cells.
-func WithPOSIXFS(x posixfs.FS) Option {
+// WithPosixFS sets x as the filesystem to use for file backed cells.
+func WithPosixFS(x posixfs.FS) Option {
 	return func(c *fsConfig) {
 		c.pfs = x
 	}
 }
+
+type TCPDialer = func(context.Context, string) (net.Conn, error)
 
 // WithTCPDialer sets the dialer used for outbound TCP connections.
 func WithTCPDialer(d func(context.Context, string) (net.Conn, error)) Option {

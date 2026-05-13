@@ -1,9 +1,9 @@
 package main
 
 import (
-	"github.com/brendoncarroll/webfs/src/webfscmd"
+	"github.com/brendoncarroll/webfs/src/wfscmd"
 )
 
 func main() {
-	webfscmd.Main()
+	wfscmd.Main()
 }

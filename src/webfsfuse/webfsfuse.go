@@ -17,12 +17,14 @@ var _ = (fs.NodeLookuper)((*Node)(nil))
 
 type Node struct {
 	fs.Inode
-	sys *webfs.System
+	sys     *webfs.System
+	rootCfg webfs.VolumeConfig
 }
 
-func NewRoot(sys *webfs.System) *Node {
+func NewRoot(sys *webfs.System, rootCfg webfs.VolumeConfig) *Node {
 	return &Node{
-		sys: sys,
+		sys:     sys,
+		rootCfg: rootCfg,
 	}
 }
 

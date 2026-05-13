@@ -1,4 +1,4 @@
-package webfscmd
+package wfscmd
 
 import (
 	"context"
@@ -33,8 +33,8 @@ var mountCmd = star.Command{
 		if err != nil {
 			return err
 		}
-		sys := webfs.NewSystem(bc, cfg)
-		node := webfsfuse.NewRoot(sys)
+		sys := webfs.NewSystem(bc)
+		node := webfsfuse.NewRoot(sys, cfg)
 		srv, err := fs.Mount(mountDirParam.Load(c), node, nil)
 		if err != nil {
 			return err

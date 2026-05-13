@@ -32,14 +32,15 @@ func (ino INode) String() string {
 	return hex.EncodeToString(ino[:])
 }
 
-type Root struct {
+// FSState transitively contains the full state of the filesystem
+type FSState struct {
 	version     uint16
 	maxBlobSize uint32
 	salt        [32]byte
 	inodes      gotkv.Root
 }
 
-func (r Root) Marshal(out []byte) []byte {
+func (r FSState) Marshal(out []byte) []byte {
 	out = sbe.AppendUint16(out, r.version)
 	out = sbe.AppendUint32(out, r.maxBlobSize)
 	out = append(out, r.salt[:]...)
@@ -49,7 +50,7 @@ func (r Root) Marshal(out []byte) []byte {
 	return out
 }
 
-func (r *Root) Unmarshal(data []byte) error {
+func (r *FSState) Unmarshal(data []byte) error {
 	version, data, err := sbe.ReadUint16(data)
 	if err != nil {
 		return err
@@ -77,15 +78,15 @@ func (r *Root) Unmarshal(data []byte) error {
 	return nil
 }
 
-func LoadRoot(ctx context.Context, ldr bcsdk.Loader) (Root, error) {
+func LoadState(ctx context.Context, ldr bcsdk.Loader) (FSState, error) {
 	var data []byte
 	if err := ldr.Load(ctx, &data); err != nil {
-		return Root{}, err
+		return FSState{}, err
 	}
-	var root Root
+	var root FSState
 	return root, root.Unmarshal(data)
 }
 
-func SaveRoot(ctx context.Context, svr bcsdk.Saver, root Root) error {
+func SaveState(ctx context.Context, svr bcsdk.Saver, root FSState) error {
 	return svr.Save(ctx, root.Marshal(nil))
 }

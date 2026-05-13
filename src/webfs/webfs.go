@@ -131,7 +131,7 @@ func (sys *System) Initialize(ctx context.Context, volh blobcache.Handle) (Volum
 		if err != nil {
 			return err
 		}
-		if err := SaveRoot(ctx, tx, root); err != nil {
+		if err := SaveState(ctx, tx, root); err != nil {
 			return err
 		}
 		return tx.Commit(ctx)
@@ -211,13 +211,13 @@ type FSParams struct {
 	MaxBlobSize uint32
 }
 
-func (sys *System) NewEmpty(ctx context.Context, txn *bcsdk.Tx, fp FSParams) (Root, error) {
+func (sys *System) NewEmpty(ctx context.Context, txn *bcsdk.Tx, fp FSParams) (FSState, error) {
 	mach := newMachines(fp)
 	inodeRoot, err := mach.inodekv.NewEmpty(ctx, txn)
 	if err != nil {
-		return Root{}, err
+		return FSState{}, err
 	}
-	return Root{
+	return FSState{
 		version:     0,
 		maxBlobSize: fp.MaxBlobSize,
 		salt:        fp.Salt,
@@ -240,7 +240,7 @@ func (sys *System) getMachs(fqoid blobcache.FQOID, fp FSParams) *machines {
 }
 
 func (sys *System) wrapTx(ctx context.Context, txn *bcsdk.Tx, fqoid blobcache.FQOID) (*Tx, error) {
-	root, err := LoadRoot(ctx, txn)
+	root, err := LoadState(ctx, txn)
 	if err != nil {
 		return nil, err
 	}
@@ -248,9 +248,15 @@ func (sys *System) wrapTx(ctx context.Context, txn *bcsdk.Tx, fqoid blobcache.FQ
 	return newTx(root, txn, txn, machs), nil
 }
 
+type Linker interface {
+	Link(ctx context.Context, target blobcache.Handle, mask blobcache.ActionSet) (*blobcache.LinkToken, error)
+	Unlink(ctx context.Context, targets []blobcache.LinkTokenID) error
+}
+
 // Tx is a transaction on a webfs volume.
 type Tx struct {
-	root Root
+	// prev is the previous existing state, without any pending changes
+	prev FSState
 	ros  bcsdk.RO
 	rws  bcsdk.RW
 	link Linker
@@ -260,31 +266,26 @@ type Tx struct {
 	inodeCache map[INode]wfscnp.Node
 }
 
-type Linker interface {
-	Link(ctx context.Context, target blobcache.Handle, mask blobcache.ActionSet) (*blobcache.LinkToken, error)
-	Unlink(ctx context.Context, targets []blobcache.LinkTokenID) error
-}
-
-func newTx(root Root, s bcsdk.RW, link Linker, machs *machines) *Tx {
+func newTx(prev FSState, s bcsdk.RW, link Linker, machs *machines) *Tx {
 	return &Tx{
-		root: root,
+		prev: prev,
 		ros:  s,
 		rws:  s,
 		link: link,
 
 		fdata:   &machs.fdata,
-		inodetx: machs.inodekv.NewTx(s, root.inodes),
+		inodetx: machs.inodekv.NewTx(s, prev.inodes),
 	}
 }
 
 // Flush writes out the changes to the store and returns a new root.
-func (tx *Tx) Flush(ctx context.Context) (Root, error) {
+func (tx *Tx) Flush(ctx context.Context) (FSState, error) {
 	inodekvroot, err := tx.inodetx.Flush(ctx)
 	if err != nil {
-		return Root{}, err
+		return FSState{}, err
 	}
-	tx.root.inodes = inodekvroot
-	return tx.root, nil
+	tx.prev.inodes = inodekvroot
+	return tx.prev, nil
 }
 
 func (tx *Tx) getNode(ctx context.Context, ino INode) (wfscnp.Node, error) {
@@ -335,5 +336,5 @@ func (tx *Tx) putNode(ctx context.Context, ino INode, node wfscnp.Node) error {
 }
 
 func (tx *Tx) setRoot(ctx context.Context, node wfscnp.Node) error {
-	return tx.putNode(ctx, rootINode(), node)
+	return tx.putNode(ctx, INode{}, node)
 }

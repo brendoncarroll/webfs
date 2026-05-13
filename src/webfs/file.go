@@ -75,7 +75,11 @@ func (tx *Tx) getFile(ctx context.Context, ino INode) (wfscnp.File, wfscnp.Node,
 	if node.Payload().Which() != wfscnp.Node_payload_Which_file {
 		return wfscnp.File{}, wfscnp.Node{}, &ErrWrongType{INode: ino, WantType: "file"}
 	}
-	return wfscnp.File{}, node, nil
+	file, err := node.Payload().File()
+	if err != nil {
+		return wfscnp.File{}, wfscnp.Node{}, err
+	}
+	return file, node, nil
 }
 
 // WriteBlock writes buf, whos length must match the file's block size to the file.
@@ -106,15 +110,15 @@ func (tx *Tx) writeBlock(ctx context.Context, ino INode, blockno uint64, buf []b
 // ReadBlock reads the blockno into buf.  If buf is short, data is written until buf is full, then nil is returned.
 // If there is no block
 func (tx *Tx) ReadBlock(ctx context.Context, ino INode, blockno uint64, buf []byte) error {
-	_, _, err := tx.getFile(ctx, ino)
+	file, _, err := tx.getFile(ctx, ino)
 	if err != nil {
 		return err
 	}
-	return tx.readBlock(ctx, ino, blockno, buf)
+	return tx.readBlock(ctx, ino, blockno, file.BlockSize(), buf)
 }
 
 // readBlock assumes that ino refers to a valid file node in this transaction
-func (tx *Tx) readBlock(ctx context.Context, ino INode, blockno uint64, buf []byte) error {
+func (tx *Tx) readBlock(ctx context.Context, ino INode, blockno uint64, blockSize uint32, buf []byte) error {
 	key := makeBlockKey(nil, ino, blockno)
 	var refData []byte
 	exists, err := tx.inodetx.Get(ctx, key, &refData)
@@ -129,11 +133,18 @@ func (tx *Tx) readBlock(ctx context.Context, ino INode, blockno uint64, buf []by
 	if err := ref.Unmarshal(refData); err != nil {
 		return err
 	}
-	n, err := tx.fdata.Read(ctx, tx.ros, ref, buf)
+	readBuf := buf
+	if int(blockSize) > len(readBuf) {
+		readBuf = make([]byte, blockSize)
+	}
+	n, err := tx.fdata.Read(ctx, tx.ros, ref, readBuf)
 	if err != nil {
 		return err
 	}
-	clear(buf[n:])
+	clear(readBuf[n:])
+	if len(readBuf) != len(buf) {
+		copy(buf, readBuf[:len(buf)])
+	}
 	return nil
 }
 
@@ -166,7 +177,7 @@ func (tx *Tx) WriteAt(ctx context.Context, ino INode, offset int64, buf []byte) 
 			}
 		} else {
 			fullBlock := make([]byte, int(blockSize))
-			if err := tx.readBlock(ctx, ino, blockNo, fullBlock); err != nil {
+			if err := tx.readBlock(ctx, ino, blockNo, uint32(blockSize), fullBlock); err != nil {
 				return err
 			}
 			copy(fullBlock[blockOff:blockOff+toWrite], remaining[:toWrite])
@@ -214,12 +225,12 @@ func (tx *Tx) ReadAt(ctx context.Context, ino INode, offset int64, buf []byte) (
 		blockOff := int(curOff % blockSize)
 		take := min(remaining, int(blockSize)-blockOff)
 		if blockOff == 0 {
-			if err := tx.readBlock(ctx, ino, blockNo, buf[read:read+take]); err != nil {
+			if err := tx.readBlock(ctx, ino, blockNo, uint32(blockSize), buf[read:read+take]); err != nil {
 				return read, err
 			}
 		} else {
 			fullBlock := make([]byte, int(blockSize))
-			if err := tx.readBlock(ctx, ino, blockNo, fullBlock); err != nil {
+			if err := tx.readBlock(ctx, ino, blockNo, uint32(blockSize), fullBlock); err != nil {
 				return read, err
 			}
 			copy(buf[read:read+take], fullBlock[blockOff:blockOff+take])
@@ -229,7 +240,10 @@ func (tx *Tx) ReadAt(ctx context.Context, ino INode, offset int64, buf []byte) (
 		curOff += int64(take)
 	}
 	if read < len(buf) {
-		return read, io.EOF
+		if read == 0 {
+			return 0, io.EOF
+		}
+		return read, nil
 	}
 	return read, nil
 }

@@ -1,3 +1,4 @@
+// Package wfscmd implements the WebFS command line tool
 package wfscmd
 
 import (

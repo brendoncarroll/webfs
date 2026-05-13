@@ -19,10 +19,11 @@ import (
 )
 
 type VolumeConfig struct {
-	NodeID        blobcache.NodeID `json:"node"`
-	VolumeID      blobcache.OID    `json:"volume"`
-	DEK           blobcache.DEK    `json:"dek"`
-	PrivateKeyHex string           `json:"private_key"`
+	NodeID        blobcache.NodeID   `json:"node"`
+	VolumeID      blobcache.OID      `json:"volume"`
+	HashAlgo      blobcache.HashAlgo `json:"hash_algo"`
+	DEK           blobcache.DEK      `json:"dek"`
+	PrivateKeyHex string             `json:"private_key"`
 }
 
 func (vc VolumeConfig) FQOID() blobcache.FQOID {
@@ -47,12 +48,14 @@ func newMachines(fp FSParams) *machines {
 	gdat.DeriveKey(inokvSalt[:], &fp.Salt, []byte(inodekv))
 	return &machines{
 		fdata: *gdat.NewMachine(gdat.Params{
-			Salt: dataSalt,
+			Salt:          dataSalt,
+			KeyedHashFunc: fp.HashAlgo.KeyedHash,
 		}),
 		inodekv: gotkv.NewMachine(gotkv.Params{
-			Salt:     inokvSalt,
-			MaxSize:  int(fp.MaxBlobSize),
-			MeanSize: 1 << 13,
+			Salt:          inokvSalt,
+			MaxSize:       int(fp.MaxBlobSize),
+			MeanSize:      1 << 13,
+			KeyedHashFunc: fp.HashAlgo.KeyedHash,
 		}),
 	}
 }
@@ -93,6 +96,7 @@ func (sys *System) Initialize(ctx context.Context, volh blobcache.Handle) (Volum
 	rand.Read(secret[:])
 	dek := secret
 
+	hashAlgo := blobcache.HashAlgo_BLAKE3_256
 	// setup volume
 	if err := func() error {
 		tx, err := bcsdk.BeginTx(ctx, sys.bc, volh, blobcache.TxParams{Modify: true})
@@ -109,6 +113,7 @@ func (sys *System) Initialize(ctx context.Context, volh blobcache.Handle) (Volum
 		var salt [32]byte
 		rand.Read(salt[:])
 		fsp := FSParams{
+			HashAlgo:    hashAlgo,
 			Salt:        salt,
 			MaxBlobSize: uint32(tx.MaxSize()),
 		}
@@ -146,6 +151,7 @@ func (sys *System) Initialize(ctx context.Context, volh blobcache.Handle) (Volum
 	return VolumeConfig{
 		NodeID:        ep.Node,
 		VolumeID:      volh.OID,
+		HashAlgo:      hashAlgo,
 		PrivateKeyHex: hex.EncodeToString(privKeyData),
 		DEK:           dek,
 	}, nil
@@ -166,7 +172,7 @@ func (sys *System) View(ctx context.Context, vcfg VolumeConfig, fn func(*Tx) err
 		return err
 	}
 	fqoid := blobcache.FQOID{OID: volh.OID, Node: ep.Node}
-	txn2, err := sys.wrapTx(ctx, txn, fqoid)
+	txn2, err := sys.wrapTx(ctx, txn, fqoid, vcfg.HashAlgo)
 	if err != nil {
 		return err
 	}
@@ -188,7 +194,7 @@ func (sys *System) Modify(ctx context.Context, vcfg VolumeConfig, fn func(*Tx) e
 		return err
 	}
 	fqoid := blobcache.FQOID{OID: volh.OID, Node: ep.Node}
-	txn2, err := sys.wrapTx(ctx, txn, fqoid)
+	txn2, err := sys.wrapTx(ctx, txn, fqoid, vcfg.HashAlgo)
 	if err != nil {
 		return err
 	}
@@ -207,6 +213,7 @@ func (sys *System) Modify(ctx context.Context, vcfg VolumeConfig, fn func(*Tx) e
 
 // FSParams contains filesystem level parameters.
 type FSParams struct {
+	HashAlgo    blobcache.HashAlgo
 	Salt        [32]byte
 	MaxBlobSize uint32
 }
@@ -239,12 +246,12 @@ func (sys *System) getMachs(fqoid blobcache.FQOID, fp FSParams) *machines {
 	return machs
 }
 
-func (sys *System) wrapTx(ctx context.Context, txn *bcsdk.Tx, fqoid blobcache.FQOID) (*Tx, error) {
+func (sys *System) wrapTx(ctx context.Context, txn *bcsdk.Tx, fqoid blobcache.FQOID, hashAlgo blobcache.HashAlgo) (*Tx, error) {
 	root, err := LoadState(ctx, txn)
 	if err != nil {
 		return nil, err
 	}
-	machs := sys.getMachs(fqoid, FSParams{MaxBlobSize: root.maxBlobSize, Salt: root.salt})
+	machs := sys.getMachs(fqoid, FSParams{HashAlgo: hashAlgo, MaxBlobSize: root.maxBlobSize, Salt: root.salt})
 	return newTx(root, txn, txn, machs), nil
 }
 

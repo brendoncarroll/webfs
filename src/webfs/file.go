@@ -10,8 +10,15 @@ import (
 	capnp "capnproto.org/go/capnp/v3"
 	"github.com/brendoncarroll/webfs/src/internal/wfscnp"
 	"github.com/gotvc/got/src/gdat"
+	"github.com/gotvc/got/src/gotkv"
+	"go.brendoncarroll.net/exp/streams"
 	"go.brendoncarroll.net/tai64"
 )
+
+type FileInfo struct {
+	Size      uint64
+	BlockSize uint32
+}
 
 type FileParams struct {
 	Now       tai64.TAI64N
@@ -80,6 +87,50 @@ func (tx *Tx) getFile(ctx context.Context, ino INode) (wfscnp.File, wfscnp.Node,
 		return wfscnp.File{}, wfscnp.Node{}, err
 	}
 	return file, node, nil
+}
+
+func (tx *Tx) StatFile(ctx context.Context, ino INode) (FileInfo, error) {
+	file, _, err := tx.getFile(ctx, ino)
+	if err != nil {
+		return FileInfo{}, err
+	}
+	return FileInfo{Size: file.Size(), BlockSize: file.BlockSize()}, nil
+}
+
+func (tx *Tx) Truncate(ctx context.Context, ino INode, size uint64) error {
+	file, node, err := tx.getFile(ctx, ino)
+	if err != nil {
+		return err
+	}
+	if size == file.Size() {
+		return nil
+	}
+	if size == 0 {
+		if _, err := tx.inodetx.Flush(ctx); err != nil {
+			return err
+		}
+		it := tx.inodetx.IterateFlushed(ctx, gotkv.PrefixSpan(ino[:]))
+		buf := make([]gotkv.Entry, 32)
+		for {
+			n, err := it.Next(ctx, buf)
+			if err != nil {
+				if streams.IsEOS(err) {
+					break
+				}
+				return err
+			}
+			for i := 0; i < n; i++ {
+				if len(buf[i].Key) != len(ino)+8 {
+					continue
+				}
+				if err := tx.inodetx.Delete(ctx, buf[i].Key); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	file.SetSize(size)
+	return tx.putNode(ctx, ino, node)
 }
 
 // WriteBlock writes buf, whos length must match the file's block size to the file.

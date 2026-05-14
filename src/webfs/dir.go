@@ -174,6 +174,9 @@ func (tx *Tx) ReadDir(ctx context.Context, ino INode, gteq string) iter.Seq2[Dir
 				return
 			}
 			for i := 0; i < n; i++ {
+				if len(buf[i].Key) <= len(ino) {
+					continue
+				}
 				dv, err := parseDirValue(buf[i].Value)
 				if err != nil {
 					if !yield(DirEnt{}, err) {

@@ -3,7 +3,7 @@ module github.com/brendoncarroll/webfs
 go 1.26.0
 
 require (
-	blobcache.io/blobcache v0.7.0
+	blobcache.io/blobcache v0.7.1-0.20260514001019-8ac94d86430a
 	capnproto.org/go/capnp/v3 v3.1.0-alpha.2
 	github.com/cloudflare/circl v1.6.1
 	github.com/gotvc/got v0.4.1-0.20260513215211-9f0613487494

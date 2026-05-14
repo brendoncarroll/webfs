@@ -1,5 +1,5 @@
-blobcache.io/blobcache v0.7.0 h1:FQ8GkgFUJMZ/SW+QBoa/gzeKWackaJOlz6MrQEnKFi8=
-blobcache.io/blobcache v0.7.0/go.mod h1:ChCuHmI/3rEYRGz5tHGpzqcq+LVluV9GOIQ1skCxaFU=
+blobcache.io/blobcache v0.7.1-0.20260514001019-8ac94d86430a h1:OOB+QTneSBIhK9w2aTEBHKJj5KfOO/T/2NwtZp56Ftk=
+blobcache.io/blobcache v0.7.1-0.20260514001019-8ac94d86430a/go.mod h1:ChCuHmI/3rEYRGz5tHGpzqcq+LVluV9GOIQ1skCxaFU=
 capnproto.org/go/capnp/v3 v3.1.0-alpha.2 h1:93ISpqHf2/3WQlfrBP0tT8Dg/RQc3uq6DV36vN0ePWk=
 capnproto.org/go/capnp/v3 v3.1.0-alpha.2/go.mod h1:2vT5D2dtG8sJGEoEKU17e+j7shdaYp1Myl8X03B3hmc=
 charm.land/bubbletea/v2 v2.0.2 h1:4CRtRnuZOdFDTWSff9r8QFt/9+z6Emubz3aDMnf/dx0=

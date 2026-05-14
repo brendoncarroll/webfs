@@ -40,6 +40,7 @@ type FSState struct {
 	inodes      gotkv.Root
 	xattrs      gotkv.Root
 	sessions    gotkv.Root
+	locks       gotkv.Root
 }
 
 func (r FSState) Marshal(out []byte) []byte {
@@ -51,6 +52,7 @@ func (r FSState) Marshal(out []byte) []byte {
 	out = appendRoot(out, r.inodes)
 	out = appendRoot(out, r.xattrs)
 	out = appendRoot(out, r.sessions)
+	out = appendRoot(out, r.locks)
 	return out
 }
 
@@ -91,6 +93,11 @@ func (r *FSState) Unmarshal(data []byte) error {
 		return err
 	}
 	r.sessions = sessions
+	locks, data, err := readRoot(data)
+	if err != nil {
+		return err
+	}
+	r.locks = locks
 	if len(data) != 0 {
 		return fmt.Errorf("unexpected trailing state data: %d bytes", len(data))
 	}

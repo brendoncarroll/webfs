@@ -27,6 +27,10 @@ func TestPOSIX(t *testing.T) {
 		"RenameOpenDir":   "rename-over-directory semantics are not implemented yet",
 		"XAttr":           "xattr operations are not implemented yet",
 	}
+	parallel := map[string]struct{}{
+		"FcntlFlockLocksFile": {},
+		"FcntlFlockSetLk":     {},
+	}
 
 	names := make([]string, 0, len(posixtest.All))
 	for name := range posixtest.All {
@@ -44,6 +48,9 @@ func TestPOSIX(t *testing.T) {
 
 		fn := posixtest.All[name]
 		t.Run(name, func(t *testing.T) {
+			if _, ok := parallel[name]; ok {
+				t.Parallel()
+			}
 			mnt, unmount := mountTestFS(t)
 			defer unmount()
 			fn(t, mnt)

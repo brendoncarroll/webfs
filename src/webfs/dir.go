@@ -215,6 +215,9 @@ func (tx *Tx) decRef(ctx context.Context, ino INode) error {
 			}
 		}
 	}
+	if err := tx.deleteXAttrs(ctx, ino); err != nil {
+		return err
+	}
 	if tx.inodeCache != nil {
 		delete(tx.inodeCache, ino)
 	}

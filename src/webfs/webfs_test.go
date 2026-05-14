@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"strings"
 	"testing"
 
 	"blobcache.io/blobcache/src/bclocal"
@@ -95,6 +96,58 @@ func TestDir(t *testing.T) {
 		if _, err := tx.ReadAt(ctx, fileIno, 0, make([]byte, 1)); err == nil {
 			return fmt.Errorf("expected file inode to be deleted after final unlink")
 		}
+		return nil
+	}))
+}
+
+func TestXAttrs(t *testing.T) {
+	ctx := context.Background()
+	sys, vcfg := setupVol(t)
+	var fileIno INode
+
+	require.NoError(t, sys.Modify(ctx, vcfg, func(tx *Tx) error {
+		ino, err := tx.CreateFileAt(ctx, rootINode(), "a", 0o644, FileParams{
+			Now:       tai64.Now(),
+			BlockSize: 4096,
+		})
+		require.NoError(t, err)
+		fileIno = ino
+
+		require.NoError(t, tx.SetXAttr(ctx, fileIno, "user.key", []byte("old")))
+		require.NoError(t, tx.SetXAttr(ctx, fileIno, "user.key", []byte("new")))
+		return nil
+	}))
+
+	require.NoError(t, sys.View(ctx, vcfg, func(tx *Tx) error {
+		value, err := tx.GetXAttr(ctx, fileIno, "user.key")
+		require.NoError(t, err)
+		require.Equal(t, []byte("new"), value)
+		return nil
+	}))
+
+	require.NoError(t, sys.Modify(ctx, vcfg, func(tx *Tx) error {
+		require.NoError(t, tx.RemoveXAttr(ctx, fileIno, "user.key"))
+		_, err := tx.GetXAttr(ctx, fileIno, "user.key")
+		require.ErrorIs(t, err, fs.ErrNotExist)
+		return nil
+	}))
+}
+
+func TestXAttrSizeLimits(t *testing.T) {
+	ctx := context.Background()
+	sys, vcfg := setupVol(t)
+
+	require.NoError(t, sys.Modify(ctx, vcfg, func(tx *Tx) error {
+		ino, err := tx.CreateFileAt(ctx, rootINode(), "a", 0o644, FileParams{
+			Now:       tai64.Now(),
+			BlockSize: 4096,
+		})
+		require.NoError(t, err)
+
+		require.NoError(t, tx.SetXAttr(ctx, ino, XAttrKey(strings.Repeat("a", MaxXAttrKeySize)), nil))
+		require.Error(t, tx.SetXAttr(ctx, ino, XAttrKey(strings.Repeat("a", MaxXAttrKeySize+1)), nil))
+		require.NoError(t, tx.SetXAttr(ctx, ino, "user.value", make([]byte, MaxXAttrValueSize)))
+		require.Error(t, tx.SetXAttr(ctx, ino, "user.value", make([]byte, MaxXAttrValueSize+1)))
 		return nil
 	}))
 }

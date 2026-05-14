@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"blobcache.io/blobcache/src/bcsdk"
-	"github.com/gotvc/got/src/gdat"
 	"github.com/gotvc/got/src/gotkv"
 	"go.brendoncarroll.net/exp/sbe"
 )
@@ -38,6 +37,7 @@ type FSState struct {
 	maxBlobSize uint32
 	salt        [32]byte
 	inodes      gotkv.Root
+	xattrs      gotkv.Root
 }
 
 func (r FSState) Marshal(out []byte) []byte {
@@ -45,8 +45,8 @@ func (r FSState) Marshal(out []byte) []byte {
 	out = sbe.AppendUint32(out, r.maxBlobSize)
 	out = append(out, r.salt[:]...)
 
-	out = append(out, r.inodes.Ref.Marshal()...)
-	out = append(out, r.inodes.Depth)
+	out = appendRoot(out, r.inodes)
+	out = appendRoot(out, r.xattrs)
 	return out
 }
 
@@ -67,15 +67,36 @@ func (r *FSState) Unmarshal(data []byte) error {
 	}
 	r.salt = [32]byte(saltData)
 
-	if len(data) != gdat.RefSize+1 {
-		return fmt.Errorf("wrong size for gotkv root HAVE: %d WANT: %d", len(data), gdat.RefSize+1)
-	}
-	var zero INode
-	if err := r.inodes.Unmarshal(data); err != nil {
+	inodes, data, err := readRoot(data)
+	if err != nil {
 		return err
 	}
-	r.inodes.First = zero[:]
+	r.inodes = inodes
+	xattrs, data, err := readRoot(data)
+	if err != nil {
+		return err
+	}
+	r.xattrs = xattrs
+	if len(data) != 0 {
+		return fmt.Errorf("unexpected trailing state data: %d bytes", len(data))
+	}
 	return nil
+}
+
+func appendRoot(out []byte, root gotkv.Root) []byte {
+	return sbe.AppendLP(out, root.Marshal(nil))
+}
+
+func readRoot(data []byte) (gotkv.Root, []byte, error) {
+	rootData, rest, err := sbe.ReadLP(data)
+	if err != nil {
+		return gotkv.Root{}, nil, err
+	}
+	var root gotkv.Root
+	if err := root.Unmarshal(rootData); err != nil {
+		return gotkv.Root{}, nil, err
+	}
+	return root, rest, nil
 }
 
 func LoadState(ctx context.Context, ldr bcsdk.Loader) (FSState, error) {

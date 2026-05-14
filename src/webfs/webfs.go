@@ -37,17 +37,22 @@ type machines struct {
 	fdata gdat.Machine
 	// inodekv manages interactions with the inode table.
 	inodekv gotkv.Machine
+	// xattrkv manages interactions with the xattrs table.
+	xattrkv gotkv.Machine
 }
 
 func newMachines(fp FSParams) *machines {
 	const (
 		filedata = "filedata"
 		inodekv  = "inodekv"
+		xattrkv  = "xattrkv"
 	)
 	var dataSalt [32]byte
 	gdat.DeriveKey(dataSalt[:], &fp.Salt, []byte(filedata))
 	var inokvSalt [32]byte
 	gdat.DeriveKey(inokvSalt[:], &fp.Salt, []byte(inodekv))
+	var xattrkvSalt [32]byte
+	gdat.DeriveKey(xattrkvSalt[:], &fp.Salt, []byte(xattrkv))
 	return &machines{
 		fdata: *gdat.NewMachine(gdat.Params{
 			Salt:          dataSalt,
@@ -55,6 +60,12 @@ func newMachines(fp FSParams) *machines {
 		}),
 		inodekv: gotkv.NewMachine(gotkv.Params{
 			Salt:          inokvSalt,
+			MaxSize:       int(fp.MaxBlobSize),
+			MeanSize:      1 << 13,
+			KeyedHashFunc: fp.HashAlgo.KeyedHash,
+		}),
+		xattrkv: gotkv.NewMachine(gotkv.Params{
+			Salt:          xattrkvSalt,
 			MaxSize:       int(fp.MaxBlobSize),
 			MeanSize:      1 << 13,
 			KeyedHashFunc: fp.HashAlgo.KeyedHash,
@@ -228,11 +239,16 @@ func (sys *System) NewEmpty(ctx context.Context, txn *bcsdk.Tx, fp FSParams) (FS
 	if err != nil {
 		return FSState{}, err
 	}
+	xattrRoot, err := mach.xattrkv.NewEmpty(ctx, txn)
+	if err != nil {
+		return FSState{}, err
+	}
 	return FSState{
 		version:     0,
 		maxBlobSize: fp.MaxBlobSize,
 		salt:        fp.Salt,
 		inodes:      inodeRoot,
+		xattrs:      xattrRoot,
 	}, nil
 }
 
@@ -274,6 +290,7 @@ type Tx struct {
 
 	fdata      *gdat.Machine
 	inodetx    *gotkv.Tx
+	xattrtx    *gotkv.Tx
 	inodeCache map[INode]wfscnp.Node
 }
 
@@ -290,6 +307,7 @@ func newTx(prev FSState, s bcsdk.RW, link Linker, machs *machines) *Tx {
 
 		fdata:   &machs.fdata,
 		inodetx: machs.inodekv.NewTx(s, prev.inodes),
+		xattrtx: machs.xattrkv.NewTx(s, prev.xattrs),
 	}
 }
 
@@ -299,7 +317,12 @@ func (tx *Tx) Flush(ctx context.Context) (FSState, error) {
 	if err != nil {
 		return FSState{}, err
 	}
+	xattrkvroot, err := tx.xattrtx.Flush(ctx)
+	if err != nil {
+		return FSState{}, err
+	}
 	tx.prev.inodes = inodekvroot
+	tx.prev.xattrs = xattrkvroot
 	return tx.prev, nil
 }
 

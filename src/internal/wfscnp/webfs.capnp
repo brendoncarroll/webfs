@@ -44,3 +44,27 @@ struct VolumeLink {
     nodeID @0 :Data;
     oid @1 :Data;
 }
+
+struct Session {
+    createAt @0: TAI64N;
+    # ttl is the time to live in seconds.
+    ttl @1: UInt32;
+    # publicKeyRef is a blobcache.CID pointing at a public key.
+    publicKeyRef @2: Ref;
+    touchedAt @3: TAI64N;
+}
+
+struct Ref {
+    cid @0: UInt256;
+    dek @1: UInt256;
+}
+
+# UInt256 is suitable for storing blobcache.CIDs
+struct UInt256 {
+    # a is the lowest bits, little endian
+    a @0: UInt64;
+    b @1: UInt64;
+    c @2: UInt64;
+    # d is the highest bits, little endian
+    d @3: UInt64;
+}

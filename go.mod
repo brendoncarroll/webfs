@@ -9,10 +9,11 @@ require (
 	github.com/gotvc/got v0.4.1-0.20260513215211-9f0613487494
 	github.com/hanwen/go-fuse/v2 v2.8.0
 	github.com/stretchr/testify v1.11.1
-	go.brendoncarroll.net/exp v0.0.0-20260408161004-7a1393ced7c9
+	go.brendoncarroll.net/exp v0.0.0-20260502194125-44f3dd6ca513
 	go.brendoncarroll.net/star v0.0.0-20260504181633-9736e9cb9450
 	go.brendoncarroll.net/tai64 v0.0.0-20241118171318-6e12d283d5e4
 	go.inet256.org/inet256 v0.0.8
+	golang.org/x/sys v0.42.0
 )
 
 require (
@@ -69,7 +70,6 @@ require (
 	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b // indirect
 	golang.org/x/net v0.47.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
-	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.32.0 // indirect
 	google.golang.org/protobuf v1.35.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect

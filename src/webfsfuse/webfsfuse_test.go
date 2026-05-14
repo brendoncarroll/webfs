@@ -53,7 +53,8 @@ func mountTestFS(t *testing.T) (string, func()) {
 	t.Helper()
 
 	sys, cfg := setupVolume(t)
-	root := NewRoot(sys, cfg)
+	fusefs := New(sys, cfg)
+	root := fusefs.Root()
 	mountPoint := t.TempDir()
 
 	srv, err := fs.Mount(mountPoint, root, &fs.Options{})

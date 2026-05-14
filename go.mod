@@ -6,7 +6,7 @@ require (
 	blobcache.io/blobcache v0.7.1-0.20260514001019-8ac94d86430a
 	capnproto.org/go/capnp/v3 v3.1.0-alpha.2
 	github.com/cloudflare/circl v1.6.1
-	github.com/gotvc/got v0.4.1-0.20260513215211-9f0613487494
+	github.com/gotvc/got v0.4.1-0.20260514135151-658fded0a865
 	github.com/hanwen/go-fuse/v2 v2.8.0
 	github.com/stretchr/testify v1.11.1
 	go.brendoncarroll.net/exp v0.0.0-20260502194125-44f3dd6ca513

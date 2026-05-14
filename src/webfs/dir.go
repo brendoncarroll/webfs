@@ -11,14 +11,12 @@ import (
 	capnp "capnproto.org/go/capnp/v3"
 	"github.com/brendoncarroll/webfs/src/internal/wfscnp"
 	"github.com/gotvc/got/src/gotkv"
-	"go.brendoncarroll.net/exp/sbe"
 	"go.brendoncarroll.net/exp/streams"
 	"go.brendoncarroll.net/tai64"
 )
 
 type DirEnt struct {
 	Name   string
-	Mode   fs.FileMode
 	Target INode
 }
 
@@ -34,18 +32,18 @@ func (tx *Tx) getDir(ctx context.Context, ino INode) (wfscnp.Dir, error) {
 }
 
 // CreateDirAt creates a new empty directory, and adds it to the parent.
-func (tx *Tx) CreateDirAt(ctx context.Context, parent INode, name string) (INode, error) {
-	ino, err := tx.createDir(ctx)
+func (tx *Tx) CreateDirAt(ctx context.Context, parent INode, name string, mode fs.FileMode) (INode, error) {
+	ino, err := tx.createDir(ctx, mode)
 	if err != nil {
 		return INode{}, err
 	}
-	if err := tx.Link(ctx, parent, name, fs.ModeDir|0o755, ino); err != nil {
+	if err := tx.Link(ctx, parent, name, ino); err != nil {
 		return INode{}, err
 	}
 	return ino, nil
 }
 
-func (tx *Tx) createDir(ctx context.Context) (INode, error) {
+func (tx *Tx) createDir(ctx context.Context, mode fs.FileMode) (INode, error) {
 	now := tai64.Now()
 	_, seg := capnp.NewSingleSegmentMessage(nil)
 	node, err := wfscnp.NewRootNode(seg)
@@ -53,7 +51,7 @@ func (tx *Tx) createDir(ctx context.Context) (INode, error) {
 		return INode{}, err
 	}
 	node.SetRefCount(0)
-	node.SetRev(0)
+	setNodeMode(node, fs.ModeDir|(mode&0o7777))
 	createdAt, err := node.NewCreatedAt()
 	if err != nil {
 		return INode{}, err
@@ -76,7 +74,7 @@ func (tx *Tx) createDir(ctx context.Context) (INode, error) {
 	return ino, nil
 }
 
-func (tx *Tx) Link(ctx context.Context, ino INode, name string, mode fs.FileMode, child INode) error {
+func (tx *Tx) Link(ctx context.Context, ino INode, name string, child INode) error {
 	if err := checkName(name); err != nil {
 		return err
 	}
@@ -92,9 +90,8 @@ func (tx *Tx) Link(ctx context.Context, ino INode, name string, mode fs.FileMode
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
-	ent := dirEntValue{Mode: mode, Target: child}
 	key := makeDirEntKey(nil, ino, name)
-	if err := tx.inodetx.Put(ctx, key, ent.Marshal(nil)); err != nil {
+	if err := tx.inodetx.Put(ctx, key, child[:]); err != nil {
 		return err
 	}
 	childNode.SetRefCount(childNode.RefCount() + 1)
@@ -148,13 +145,21 @@ func (tx *Tx) Rename(ctx context.Context, oldParent INode, oldName string, newPa
 	}
 
 	if dstExists {
-		if src.Mode.IsDir() && !dst.Mode.IsDir() {
+		srcMode, err := tx.GetMode(ctx, src.Target)
+		if err != nil {
+			return err
+		}
+		dstMode, err := tx.GetMode(ctx, dst.Target)
+		if err != nil {
+			return err
+		}
+		if srcMode.IsDir() && !dstMode.IsDir() {
 			return fs.ErrInvalid
 		}
-		if !src.Mode.IsDir() && dst.Mode.IsDir() {
+		if !srcMode.IsDir() && dstMode.IsDir() {
 			return fs.ErrInvalid
 		}
-		if dst.Mode.IsDir() {
+		if dstMode.IsDir() {
 			for _, err := range tx.ReadDir(ctx, dst.Target, "") {
 				if err != nil {
 					return err
@@ -169,7 +174,7 @@ func (tx *Tx) Rename(ctx context.Context, oldParent INode, oldName string, newPa
 	if err := tx.inodetx.Delete(ctx, srcKey); err != nil {
 		return err
 	}
-	if err := tx.inodetx.Put(ctx, dstKey, dirEntValue{Mode: src.Mode, Target: src.Target}.Marshal(nil)); err != nil {
+	if err := tx.inodetx.Put(ctx, dstKey, src.Target[:]); err != nil {
 		return err
 	}
 	if dstExists {
@@ -243,7 +248,7 @@ func (tx *Tx) ReadDir(ctx context.Context, ino INode, gteq string) iter.Seq2[Dir
 				if len(buf[i].Key) <= len(ino) {
 					continue
 				}
-				dv, err := parseDirValue(buf[i].Value)
+				target, err := parseDirEntValue(buf[i].Value)
 				if err != nil {
 					if !yield(DirEnt{}, err) {
 						return
@@ -251,7 +256,7 @@ func (tx *Tx) ReadDir(ctx context.Context, ino INode, gteq string) iter.Seq2[Dir
 					continue
 				}
 				name := string(buf[i].Key[len(ino):])
-				ent := DirEnt{Name: name, Mode: dv.Mode, Target: dv.Target}
+				ent := DirEnt{Name: name, Target: target}
 				if !yield(ent, nil) {
 					return
 				}
@@ -275,14 +280,13 @@ func (tx *Tx) GetChild(ctx context.Context, ino INode, name string) (DirEnt, err
 	if !exists {
 		return DirEnt{}, fs.ErrNotExist
 	}
-	dv, err := parseDirValue(val)
+	target, err := parseDirEntValue(val)
 	if err != nil {
 		return DirEnt{}, err
 	}
 	return DirEnt{
 		Name:   name,
-		Mode:   dv.Mode,
-		Target: dv.Target,
+		Target: target,
 	}, nil
 }
 
@@ -301,34 +305,11 @@ func checkName(name string) error {
 	return nil
 }
 
-// dirEntValue is the value component of a directory entry
-type dirEntValue struct {
-	Mode   fs.FileMode
-	Target INode
-}
-
-func (de dirEntValue) Marshal(out []byte) []byte {
-	out = sbe.AppendUint32(out, uint32(de.Mode))
-	out = append(out, de.Target[:]...)
-	return out
-}
-
-func parseDirValue(data []byte) (dirEntValue, error) {
-	mode, data, err := sbe.ReadUint32(data)
-	if err != nil {
-		return dirEntValue{}, err
-	}
-	targetData, data, err := sbe.ReadN(data, len(INode{}))
-	if err != nil {
-		return dirEntValue{}, err
-	}
-	if len(data) > 0 {
-		return dirEntValue{}, fmt.Errorf("extra trailing bytes in dirValue: %d", len(data))
+func parseDirEntValue(data []byte) (INode, error) {
+	if len(data) != len(INode{}) {
+		return INode{}, fmt.Errorf("wrong dir entry value size HAVE: %d WANT: %d", len(data), len(INode{}))
 	}
 	var target INode
-	copy(target[:], targetData)
-	return dirEntValue{
-		Mode:   fs.FileMode(mode),
-		Target: target,
-	}, nil
+	copy(target[:], data)
+	return target, nil
 }

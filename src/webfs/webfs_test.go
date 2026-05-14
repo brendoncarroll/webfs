@@ -57,7 +57,7 @@ func TestDir(t *testing.T) {
 		if err := tx.WriteAt(ctx, fileIno, 0, contents); err != nil {
 			return err
 		}
-		if err := tx.Link(ctx, rootINode(), "b", 0o644, fileIno); err != nil {
+		if err := tx.Link(ctx, rootINode(), "b", fileIno); err != nil {
 			return err
 		}
 

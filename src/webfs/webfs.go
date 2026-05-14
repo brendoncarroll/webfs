@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"io/fs"
 	"sync"
 
 	"blobcache.io/blobcache/src/bcsdk"
@@ -129,6 +130,7 @@ func (sys *System) Initialize(ctx context.Context, volh blobcache.Handle) (Volum
 			return err
 		}
 		node.Payload().NewDir()
+		setNodeMode(node, fs.ModeDir|0o755)
 		if err := tx2.setRoot(ctx, node); err != nil {
 			return err
 		}

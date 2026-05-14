@@ -2,6 +2,7 @@ package webfsfuse
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"io"
 	iofs "io/fs"
@@ -13,6 +14,7 @@ import (
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"go.brendoncarroll.net/tai64"
+	"go.inet256.org/inet256/src/inet256"
 	"golang.org/x/sys/unix"
 )
 
@@ -39,19 +41,30 @@ var _ = (fs.NodeUnlinker)((*Node)(nil))
 var _ = (fs.NodeRmdirer)((*Node)(nil))
 
 type fileHandle struct {
+	node   *Node
 	append bool
+	mu     sync.Mutex
+	locks  map[uint64]struct{}
+	closed bool
 }
+
+var _ = (fs.FileReleaser)((*fileHandle)(nil))
+var _ = (fs.FileGetlker)((*fileHandle)(nil))
+var _ = (fs.FileSetlker)((*fileHandle)(nil))
+var _ = (fs.FileSetlkwer)((*fileHandle)(nil))
 
 // FS is a FileSystem
 type FS struct {
 	sys     *webfs.System
+	pki     inet256.PKI
 	rootCfg webfs.VolumeConfig
 	root    Node
 }
 
-func New(sys *webfs.System, rootCfg webfs.VolumeConfig) FS {
+func New(sys *webfs.System, pki inet256.PKI, rootCfg webfs.VolumeConfig) FS {
 	return FS{
 		sys:     sys,
+		pki:     pki,
 		rootCfg: rootCfg,
 	}
 }
@@ -148,7 +161,7 @@ func (n *Node) Create(ctx context.Context, name string, _ uint32, mode uint32, o
 	if errno != 0 {
 		return nil, nil, 0, errno
 	}
-	return ch, nil, 0, 0
+	return ch, newFileHandle(ch.Operations().(*Node), false), 0, 0
 }
 
 func (n *Node) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, syscall.Errno) {
@@ -159,7 +172,7 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, s
 	if mode.IsDir() || mode&iofs.ModeSymlink != 0 {
 		return nil, 0, syscall.EISDIR
 	}
-	return &fileHandle{append: flags&syscall.O_APPEND != 0}, 0, 0
+	return newFileHandle(n, flags&syscall.O_APPEND != 0), 0, 0
 }
 
 func (n *Node) Read(ctx context.Context, _ fs.FileHandle, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
@@ -394,6 +407,139 @@ func (n *Node) Lseek(ctx context.Context, _ fs.FileHandle, off uint64, whence ui
 	}
 }
 
+func (f *fileHandle) Getlk(ctx context.Context, owner uint64, lk *fuse.FileLock, flags uint32, out *fuse.FileLock) syscall.Errno {
+	if (flags & fuse.FUSE_LK_FLOCK) != 0 {
+		return syscall.ENOTSUP
+	}
+	start, length, errno := fileLockRange(lk)
+	if errno != 0 {
+		return errno
+	}
+	kind := webfs.LockKindWrite
+	if lk.Typ == syscall.F_RDLCK {
+		kind = webfs.LockKindRead
+	}
+	out.Start = lk.Start
+	out.End = lk.End
+	out.Typ = syscall.F_UNLCK
+	out.Pid = 0
+	sessionID, err := f.node.fsys.lockSessionID()
+	if err != nil {
+		return toErrno(err)
+	}
+	err = f.node.fsys.sys.View(ctx, f.node.fsys.rootCfg, func(tx *webfs.Tx) error {
+		conflict, err := tx.FindConflictingLock(ctx, f.node.ino, sessionID, owner, kind, start, length)
+		if err != nil {
+			return err
+		}
+		if conflict == nil {
+			return nil
+		}
+		out.Start = conflict.State.Start()
+		out.End = webfsLockEnd(conflict.State.Start(), conflict.State.Length())
+		out.Typ = fuseLockTypeFromWebfs(webfs.LockKind(conflict.State.Kind()))
+		out.Pid = 0
+		return nil
+	})
+	if err != nil {
+		return toErrno(err)
+	}
+	return 0
+}
+
+func (f *fileHandle) Setlk(ctx context.Context, owner uint64, lk *fuse.FileLock, flags uint32) syscall.Errno {
+	return f.setlk(ctx, owner, lk, flags)
+}
+
+func (f *fileHandle) Setlkw(ctx context.Context, owner uint64, lk *fuse.FileLock, flags uint32) syscall.Errno {
+	return f.setlk(ctx, owner, lk, flags)
+}
+
+func (f *fileHandle) setlk(ctx context.Context, owner uint64, lk *fuse.FileLock, flags uint32) syscall.Errno {
+	if (flags & fuse.FUSE_LK_FLOCK) != 0 {
+		return syscall.ENOTSUP
+	}
+	kind, start, length, errno := fileLockToWebfs(lk)
+	if errno != 0 {
+		return errno
+	}
+	var sessionID inet256.ID
+	err := f.node.fsys.sys.Modify(ctx, f.node.fsys.rootCfg, func(tx *webfs.Tx) error {
+		var err error
+		sessionID, err = tx.EnsureSession(ctx, tai64.Now())
+		if err != nil {
+			return err
+		}
+		return tx.SetLock(ctx, sessionID, owner, f.node.ino, kind, start, length)
+	})
+	if err != nil {
+		if errors.Is(err, webfs.ErrLockConflict) {
+			return syscall.EAGAIN
+		}
+		return toErrno(err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if kind == 0 {
+		delete(f.locks, owner)
+	} else {
+		if f.locks == nil {
+			f.locks = make(map[uint64]struct{})
+		}
+		f.locks[owner] = struct{}{}
+	}
+	return 0
+}
+
+func (f *fileHandle) Release(ctx context.Context) syscall.Errno {
+	f.mu.Lock()
+	if f.closed {
+		f.mu.Unlock()
+		return 0
+	}
+	f.closed = true
+	owners := make([]uint64, 0, len(f.locks))
+	for owner := range f.locks {
+		owners = append(owners, owner)
+	}
+	f.mu.Unlock()
+	if len(owners) == 0 {
+		return 0
+	}
+	err := f.node.fsys.sys.Modify(ctx, f.node.fsys.rootCfg, func(tx *webfs.Tx) error {
+		sessionID, err := tx.EnsureSession(ctx, tai64.Now())
+		if err != nil {
+			return err
+		}
+		for _, owner := range owners {
+			if err := tx.SetLock(ctx, sessionID, owner, f.node.ino, 0, 0, 0); err != nil && !errors.Is(err, iofs.ErrNotExist) {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return toErrno(err)
+	}
+	return 0
+}
+
+func newFileHandle(n *Node, appendMode bool) *fileHandle {
+	return &fileHandle{node: n, append: appendMode}
+}
+
+func (fsys *FS) lockSessionID() (inet256.ID, error) {
+	data, err := hex.DecodeString(fsys.rootCfg.PrivateKeyHex)
+	if err != nil {
+		return inet256.ID{}, err
+	}
+	privKey, err := fsys.pki.ParsePrivateKey(data)
+	if err != nil {
+		return inet256.ID{}, err
+	}
+	return fsys.pki.NewID(inet256.PublicFromPrivate(privKey)), nil
+}
+
 func (n *Node) Unlink(ctx context.Context, name string) syscall.Errno {
 	err := n.fsys.sys.Modify(ctx, n.fsys.rootCfg, func(tx *webfs.Tx) error {
 		ent, err := tx.GetChild(ctx, n.ino, name)
@@ -444,8 +590,8 @@ func (n *Node) Rmdir(ctx context.Context, name string) syscall.Errno {
 
 func (n *Node) newChild(ctx context.Context, ino webfs.INode, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	op := &Node{
-		fsys:    n.fsys,
-		ino:     ino,
+		fsys: n.fsys,
+		ino:  ino,
 	}
 	mode, sz, links, _, errno := op.refreshStats(ctx)
 	if errno != 0 {
@@ -550,4 +696,71 @@ func toErrno(err error) syscall.Errno {
 		return syscall.EINVAL
 	}
 	return syscall.EIO
+}
+
+func fileLockToWebfs(lk *fuse.FileLock) (webfs.LockKind, uint64, uint64, syscall.Errno) {
+	start, length, errno := fileLockRange(lk)
+	if errno != 0 {
+		return 0, 0, 0, errno
+	}
+	kind, errno := fuseLockTypeToWebfs(lk.Typ)
+	if errno != 0 {
+		return 0, 0, 0, errno
+	}
+	return kind, start, length, 0
+}
+
+func fileLockRange(lk *fuse.FileLock) (uint64, uint64, syscall.Errno) {
+	start := lk.Start
+	if lk.End == ^uint64(0) || lk.End == (1<<63)-1 {
+		return start, 0, 0
+	}
+	if lk.End < start {
+		return 0, 0, syscall.EINVAL
+	}
+	return start, lk.End - start + 1, 0
+}
+
+func fuseLockTypeToWebfs(typ uint32) (webfs.LockKind, syscall.Errno) {
+	switch typ {
+	case syscall.F_RDLCK:
+		return webfs.LockKindRead, 0
+	case syscall.F_WRLCK:
+		return webfs.LockKindWrite, 0
+	case syscall.F_UNLCK:
+		return 0, 0
+	default:
+		return 0, syscall.EINVAL
+	}
+}
+
+func (n *Node) lockSessionID(ctx context.Context) (inet256.ID, error) {
+	var sessionID inet256.ID
+	err := n.fsys.sys.Modify(ctx, n.fsys.rootCfg, func(tx *webfs.Tx) error {
+		id, err := tx.EnsureSession(ctx, tai64.Now())
+		if err != nil {
+			return err
+		}
+		sessionID = id
+		return nil
+	})
+	return sessionID, err
+}
+
+func fuseLockTypeFromWebfs(kind webfs.LockKind) uint32 {
+	switch kind {
+	case webfs.LockKindRead:
+		return syscall.F_RDLCK
+	case webfs.LockKindWrite:
+		return syscall.F_WRLCK
+	default:
+		return syscall.F_UNLCK
+	}
+}
+
+func webfsLockEnd(start, length uint64) uint64 {
+	if length == 0 {
+		return (1 << 63) - 1
+	}
+	return start + length - 1
 }

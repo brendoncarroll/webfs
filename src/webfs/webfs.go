@@ -107,16 +107,16 @@ type System struct {
 }
 
 func NewSystem(svc blobcache.Service) *System {
-	pki := inet256.PKI{
+	return NewSystemWithPKI(svc, inet256.PKI{
 		Default: "mldsa87",
 		Schemes: map[string]sign.Scheme{
 			"mldsa87": mldsa87.Scheme(),
 		},
-	}
-	return &System{
-		pki: pki,
-		bc:  svc,
-	}
+	})
+}
+
+func NewSystemWithPKI(svc blobcache.Service, pki inet256.PKI) *System {
+	return &System{pki: pki, bc: svc}
 }
 
 func (sys *System) Initialize(ctx context.Context, volh blobcache.Handle) (VolumeConfig, error) {

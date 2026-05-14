@@ -16,6 +16,7 @@ import (
 	"github.com/cloudflare/circl/sign/mldsa/mldsa87"
 	"github.com/gotvc/got/src/gdat"
 	"github.com/gotvc/got/src/gotkv"
+	"go.brendoncarroll.net/tai64"
 	"go.inet256.org/inet256/src/inet256"
 )
 
@@ -61,7 +62,8 @@ func newMachines(fp FSParams) *machines {
 	}
 }
 
-// System manages a set of WebFS Volumes reachable from a single root Volume
+// System manages a set of WebFS Volumes
+// Caches and configuration are managed for each Volume.
 type System struct {
 	bc  blobcache.Service
 	pki inet256.PKI
@@ -358,4 +360,33 @@ func (tx *Tx) StatINode(ctx context.Context, ino INode) (INodeStats, error) {
 		return INodeStats{}, err
 	}
 	return INodeStats{RefCount: node.RefCount()}, nil
+}
+
+func (tx *Tx) GetModifiedAt(ctx context.Context, ino INode) (tai64.TAI64N, error) {
+	node, err := tx.getNode(ctx, ino)
+	if err != nil {
+		return tai64.TAI64N{}, err
+	}
+	ts, err := node.ModifiedAt()
+	if err != nil {
+		return tai64.TAI64N{}, err
+	}
+	return tai64.TAI64N{Seconds: ts.Seconds(), Nanoseconds: ts.Nanoseconds()}, nil
+}
+
+func (tx *Tx) SetModifiedAt(ctx context.Context, ino INode, t tai64.TAI64N) error {
+	node, err := tx.getNode(ctx, ino)
+	if err != nil {
+		return err
+	}
+	mt, err := node.ModifiedAt()
+	if err != nil || !node.HasModifiedAt() {
+		mt, err = node.NewModifiedAt()
+		if err != nil {
+			return err
+		}
+	}
+	mt.SetSeconds(t.Seconds)
+	mt.SetNanoseconds(t.Nanoseconds)
+	return tx.putNode(ctx, ino, node)
 }

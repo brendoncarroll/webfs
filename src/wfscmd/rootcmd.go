@@ -35,7 +35,8 @@ var mountCmd = star.Command{
 			return err
 		}
 		sys := webfs.NewSystem(bc)
-		node := webfsfuse.NewRoot(sys, cfg)
+		fsys := webfsfuse.New(sys, cfg)
+		node := fsys.Root()
 		srv, err := fs.Mount(mountDirParam.Load(c), node, nil)
 		if err != nil {
 			return err

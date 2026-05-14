@@ -58,6 +58,32 @@ func (tx *Tx) RemoveXAttr(ctx context.Context, ino INode, key XAttrKey) error {
 	return tx.xattrtx.Delete(ctx, makeXAttrKey(nil, ino, key))
 }
 
+func (tx *Tx) ListXAttrs(ctx context.Context, ino INode) ([]XAttrKey, error) {
+	if _, err := tx.getNode(ctx, ino); err != nil {
+		return nil, err
+	}
+	if tx.xattrtx.Queued() > 0 {
+		if _, err := tx.xattrtx.Flush(ctx); err != nil {
+			return nil, err
+		}
+	}
+	it := tx.xattrtx.Iterate(ctx, gotkv.PrefixSpan(ino[:]))
+	buf := make([]gotkv.Entry, 32)
+	var keys []XAttrKey
+	for {
+		n, err := it.Next(ctx, buf)
+		if err != nil {
+			if streams.IsEOS(err) {
+				return keys, nil
+			}
+			return nil, err
+		}
+		for i := 0; i < n; i++ {
+			keys = append(keys, XAttrKey(string(buf[i].Key[len(ino):])))
+		}
+	}
+}
+
 func makeXAttrKey(out []byte, ino INode, key XAttrKey) []byte {
 	out = append(out, ino[:]...)
 	out = append(out, key...)

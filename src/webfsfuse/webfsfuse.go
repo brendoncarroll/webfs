@@ -39,6 +39,10 @@ var _ = (fs.NodeAllocater)((*Node)(nil))
 var _ = (fs.NodeLseeker)((*Node)(nil))
 var _ = (fs.NodeUnlinker)((*Node)(nil))
 var _ = (fs.NodeRmdirer)((*Node)(nil))
+var _ = (fs.NodeGetxattrer)((*Node)(nil))
+var _ = (fs.NodeSetxattrer)((*Node)(nil))
+var _ = (fs.NodeRemovexattrer)((*Node)(nil))
+var _ = (fs.NodeListxattrer)((*Node)(nil))
 
 type fileHandle struct {
 	node   *Node
@@ -405,6 +409,102 @@ func (n *Node) Lseek(ctx context.Context, _ fs.FileHandle, off uint64, whence ui
 	default:
 		return 0, syscall.EINVAL
 	}
+}
+
+func (n *Node) Getxattr(ctx context.Context, attr string, dest []byte) (uint32, syscall.Errno) {
+	var value []byte
+	err := n.fsys.sys.View(ctx, n.fsys.rootCfg, func(tx *webfs.Tx) error {
+		var err error
+		value, err = tx.GetXAttr(ctx, n.ino, webfs.XAttrKey(attr))
+		return err
+	})
+	if err != nil {
+		if errors.Is(err, iofs.ErrNotExist) {
+			return 0, fs.ENOATTR
+		}
+		return 0, toErrno(err)
+	}
+	size := uint32(len(value))
+	if len(dest) == 0 {
+		return size, 0
+	}
+	if len(dest) < len(value) {
+		return size, syscall.ERANGE
+	}
+	copy(dest, value)
+	return size, 0
+}
+
+func (n *Node) Setxattr(ctx context.Context, attr string, data []byte, flags uint32) syscall.Errno {
+	if flags&(unix.XATTR_CREATE|unix.XATTR_REPLACE) == (unix.XATTR_CREATE | unix.XATTR_REPLACE) {
+		return syscall.EINVAL
+	}
+	err := n.fsys.sys.Modify(ctx, n.fsys.rootCfg, func(tx *webfs.Tx) error {
+		_, err := tx.GetXAttr(ctx, n.ino, webfs.XAttrKey(attr))
+		exists := err == nil
+		if err != nil && !errors.Is(err, iofs.ErrNotExist) {
+			return err
+		}
+		if flags&unix.XATTR_CREATE != 0 && exists {
+			return iofs.ErrExist
+		}
+		if flags&unix.XATTR_REPLACE != 0 && !exists {
+			return iofs.ErrNotExist
+		}
+		return tx.SetXAttr(ctx, n.ino, webfs.XAttrKey(attr), data)
+	})
+	if err != nil {
+		if errors.Is(err, iofs.ErrNotExist) {
+			return fs.ENOATTR
+		}
+		return toErrno(err)
+	}
+	return 0
+}
+
+func (n *Node) Removexattr(ctx context.Context, attr string) syscall.Errno {
+	err := n.fsys.sys.Modify(ctx, n.fsys.rootCfg, func(tx *webfs.Tx) error {
+		if _, err := tx.GetXAttr(ctx, n.ino, webfs.XAttrKey(attr)); err != nil {
+			return err
+		}
+		return tx.RemoveXAttr(ctx, n.ino, webfs.XAttrKey(attr))
+	})
+	if err != nil {
+		if errors.Is(err, iofs.ErrNotExist) {
+			return fs.ENOATTR
+		}
+		return toErrno(err)
+	}
+	return 0
+}
+
+func (n *Node) Listxattr(ctx context.Context, dest []byte) (uint32, syscall.Errno) {
+	var keys []webfs.XAttrKey
+	err := n.fsys.sys.View(ctx, n.fsys.rootCfg, func(tx *webfs.Tx) error {
+		var err error
+		keys, err = tx.ListXAttrs(ctx, n.ino)
+		return err
+	})
+	if err != nil {
+		return 0, toErrno(err)
+	}
+	var size uint32
+	for _, key := range keys {
+		size += uint32(len(key) + 1)
+	}
+	if len(dest) == 0 {
+		return size, 0
+	}
+	if len(dest) < int(size) {
+		return size, syscall.ERANGE
+	}
+	off := 0
+	for _, key := range keys {
+		off += copy(dest[off:], string(key))
+		dest[off] = 0
+		off++
+	}
+	return size, 0
 }
 
 func (f *fileHandle) Getlk(ctx context.Context, owner uint64, lk *fuse.FileLock, flags uint32, out *fuse.FileLock) syscall.Errno {

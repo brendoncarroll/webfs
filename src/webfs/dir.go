@@ -109,26 +109,92 @@ func (tx *Tx) Unlink(ctx context.Context, ino INode, name string) error {
 	if err != nil {
 		return err
 	}
-	childNode, err := tx.getNode(ctx, ent.Target)
-	if err != nil {
-		return err
-	}
-	if childNode.RefCount() == 0 {
-		return fmt.Errorf("inode %v has invalid refcount 0", ent.Target)
-	}
 	key := makeDirEntKey(nil, ino, name)
 	if err := tx.inodetx.Delete(ctx, key); err != nil {
 		return err
 	}
+	return tx.decRef(ctx, ent.Target)
+}
+
+func (tx *Tx) Rename(ctx context.Context, oldParent INode, oldName string, newParent INode, newName string) error {
+	if err := checkName(oldName); err != nil {
+		return err
+	}
+	if err := checkName(newName); err != nil {
+		return err
+	}
+	if _, err := tx.getDir(ctx, oldParent); err != nil {
+		return err
+	}
+	if _, err := tx.getDir(ctx, newParent); err != nil {
+		return err
+	}
+	if oldParent == newParent && oldName == newName {
+		return nil
+	}
+
+	src, err := tx.GetChild(ctx, oldParent, oldName)
+	if err != nil {
+		return err
+	}
+
+	var dst DirEnt
+	dstExists := false
+	if ent, err := tx.GetChild(ctx, newParent, newName); err == nil {
+		dst = ent
+		dstExists = true
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+
+	if dstExists {
+		if src.Mode.IsDir() && !dst.Mode.IsDir() {
+			return fs.ErrInvalid
+		}
+		if !src.Mode.IsDir() && dst.Mode.IsDir() {
+			return fs.ErrInvalid
+		}
+		if dst.Mode.IsDir() {
+			for _, err := range tx.ReadDir(ctx, dst.Target, "") {
+				if err != nil {
+					return err
+				}
+				return fs.ErrExist
+			}
+		}
+	}
+
+	srcKey := makeDirEntKey(nil, oldParent, oldName)
+	dstKey := makeDirEntKey(nil, newParent, newName)
+	if err := tx.inodetx.Delete(ctx, srcKey); err != nil {
+		return err
+	}
+	if err := tx.inodetx.Put(ctx, dstKey, dirEntValue{Mode: src.Mode, Target: src.Target}.Marshal(nil)); err != nil {
+		return err
+	}
+	if dstExists {
+		return tx.decRef(ctx, dst.Target)
+	}
+	return nil
+}
+
+func (tx *Tx) decRef(ctx context.Context, ino INode) error {
+	childNode, err := tx.getNode(ctx, ino)
+	if err != nil {
+		return err
+	}
+	if childNode.RefCount() == 0 {
+		return fmt.Errorf("inode %v has invalid refcount 0", ino)
+	}
 	newRefCount := childNode.RefCount() - 1
 	if newRefCount > 0 {
 		childNode.SetRefCount(newRefCount)
-		return tx.putNode(ctx, ent.Target, childNode)
+		return tx.putNode(ctx, ino, childNode)
 	}
 	if _, err := tx.inodetx.Flush(ctx); err != nil {
 		return err
 	}
-	it := tx.inodetx.IterateFlushed(ctx, gotkv.PrefixSpan(ent.Target[:]))
+	it := tx.inodetx.IterateFlushed(ctx, gotkv.PrefixSpan(ino[:]))
 	buf := make([]gotkv.Entry, 32)
 	for {
 		n, err := it.Next(ctx, buf)
@@ -145,7 +211,7 @@ func (tx *Tx) Unlink(ctx context.Context, ino INode, name string) error {
 		}
 	}
 	if tx.inodeCache != nil {
-		delete(tx.inodeCache, ent.Target)
+		delete(tx.inodeCache, ino)
 	}
 	return nil
 }

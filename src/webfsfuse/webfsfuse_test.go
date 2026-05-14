@@ -16,26 +16,14 @@ import (
 
 func TestPOSIX(t *testing.T) {
 	blacklist := map[string]string{
-		"FdLeak":                     "counts backend service descriptors that are unrelated to FUSE file-handle leaks",
-		"DirSeek":                    "directory seek semantics are not implemented yet",
-		"DirectIO":                   "O_DIRECT semantics are not implemented yet",
-		"Fallocate":                  "fallocate is not implemented yet",
-		"FallocateKeepSize":          "fallocate keep-size is not implemented yet",
-		"FcntlFlockLocksFile":        "fcntl file locking is not implemented yet",
-		"FcntlFlockSetLk":            "fcntl file locking is not implemented yet",
-		"Link":                       "hard-link operations are not implemented yet",
-		"LinkUnlinkRename":           "link/rename semantics are not implemented yet",
-		"LseekEnxioCheck":            "SEEK_DATA/SEEK_HOLE is not implemented yet",
-		"LseekHoleSeeksToEOF":        "SEEK_DATA/SEEK_HOLE is not implemented yet",
-		"NlinkZero":                  "nlink reporting semantics are not implemented yet",
-		"OpenAt":                     "openat path/rename semantics are not implemented yet",
-		"OpenSymlinkRace":            "symlink handling is not implemented yet",
-		"RenameOpenDir":              "rename semantics are not implemented yet",
-		"RenameOverwriteDestExist":   "rename overwrite semantics are not implemented yet",
-		"RenameOverwriteDestNoExist": "rename overwrite semantics are not implemented yet",
-		"SetattrSymlink":             "symlink setattr semantics are not implemented yet",
-		"SymlinkReadlink":            "symlink operations are not implemented yet",
-		"XAttr":                      "xattr operations are not implemented yet",
+		"FdLeak":              "counts backend service descriptors that are unrelated to FUSE file-handle leaks",
+		"FcntlFlockLocksFile": "fcntl file locking is not implemented yet",
+		"FcntlFlockSetLk":     "fcntl file locking is not implemented yet",
+		"FstatDeleted":        "deleted-open-file inode semantics are not implemented yet",
+		"NlinkZero":           "nlink behavior for overwritten open files is not implemented yet",
+		"OpenSymlinkRace":     "symlink race-hardening semantics are not implemented yet",
+		"RenameOpenDir":       "rename-over-directory semantics are not implemented yet",
+		"XAttr":               "xattr operations are not implemented yet",
 	}
 
 	names := make([]string, 0, len(posixtest.All))
@@ -77,7 +65,7 @@ func mountTestFS(t *testing.T) (string, func()) {
 			}
 			time.Sleep(25 * time.Millisecond)
 		}
-}
+	}
 	if err := srv.WaitMount(); err != nil {
 		_ = srv.Unmount()
 		require.NoError(t, err)

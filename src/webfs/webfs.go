@@ -273,6 +273,10 @@ type Tx struct {
 	inodeCache map[INode]wfscnp.Node
 }
 
+type INodeStats struct {
+	RefCount uint32
+}
+
 func newTx(prev FSState, s bcsdk.RW, link Linker, machs *machines) *Tx {
 	return &Tx{
 		prev: prev,
@@ -344,4 +348,12 @@ func (tx *Tx) putNode(ctx context.Context, ino INode, node wfscnp.Node) error {
 
 func (tx *Tx) setRoot(ctx context.Context, node wfscnp.Node) error {
 	return tx.putNode(ctx, INode{}, node)
+}
+
+func (tx *Tx) StatINode(ctx context.Context, ino INode) (INodeStats, error) {
+	node, err := tx.getNode(ctx, ino)
+	if err != nil {
+		return INodeStats{}, err
+	}
+	return INodeStats{RefCount: node.RefCount()}, nil
 }

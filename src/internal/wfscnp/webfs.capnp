@@ -52,6 +52,18 @@ struct Session {
     # publicKeyRef is a blobcache.CID pointing at a public key.
     publicKeyRef @2: Ref;
     touchedAt @3: TAI64N;
+    lockCount @4: UInt32;
+}
+
+struct LockState {
+    # holder is the inet256.ID that owns this lock.
+    holder @0: Data;
+    # kind is a lock-mode enum value defined in webfs.
+    kind @1: UInt16;
+    # start is the first byte in the locked range.
+    start @2: UInt64;
+    # length is the number of bytes in the locked range. 0 means to EOF.
+    length @3: UInt64;
 }
 
 struct Ref {

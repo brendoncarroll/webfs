@@ -42,6 +42,8 @@ type machines struct {
 	xattrkv gotkv.Machine
 	// sessionkv manages interactions with the sessions table.
 	sessionkv gotkv.Machine
+	// lockkv manages interactions with the locks table.
+	lockkv gotkv.Machine
 }
 
 func newMachines(fp FSParams) *machines {
@@ -50,6 +52,7 @@ func newMachines(fp FSParams) *machines {
 		inodekv   = "inodekv"
 		xattrkv   = "xattrkv"
 		sessionkv = "sessionkv"
+		lockkv    = "lockkv"
 	)
 	var dataSalt [32]byte
 	gdat.DeriveKey(dataSalt[:], &fp.Salt, []byte(filedata))
@@ -59,6 +62,8 @@ func newMachines(fp FSParams) *machines {
 	gdat.DeriveKey(xattrkvSalt[:], &fp.Salt, []byte(xattrkv))
 	var sessionkvSalt [32]byte
 	gdat.DeriveKey(sessionkvSalt[:], &fp.Salt, []byte(sessionkv))
+	var lockkvSalt [32]byte
+	gdat.DeriveKey(lockkvSalt[:], &fp.Salt, []byte(lockkv))
 	return &machines{
 		fdata: *gdat.NewMachine(gdat.Params{
 			Salt:          dataSalt,
@@ -78,6 +83,12 @@ func newMachines(fp FSParams) *machines {
 		}),
 		sessionkv: gotkv.NewMachine(gotkv.Params{
 			Salt:          sessionkvSalt,
+			MaxSize:       int(fp.MaxBlobSize),
+			MeanSize:      1 << 13,
+			KeyedHashFunc: fp.HashAlgo.KeyedHash,
+		}),
+		lockkv: gotkv.NewMachine(gotkv.Params{
+			Salt:          lockkvSalt,
 			MaxSize:       int(fp.MaxBlobSize),
 			MeanSize:      1 << 13,
 			KeyedHashFunc: fp.HashAlgo.KeyedHash,
@@ -151,7 +162,7 @@ func (sys *System) Initialize(ctx context.Context, volh blobcache.Handle) (Volum
 			return err
 		}
 		// setup root
-		tx2 := newTx(root, tx, tx, newMachines(fsp), &sys.pki)
+		tx2 := newTx(root, tx, tx, newMachines(fsp), &sys.pki, nil)
 		_, seg := capnp.NewSingleSegmentMessage(nil)
 		node, err := wfscnp.NewRootNode(seg)
 		if err != nil {
@@ -216,7 +227,11 @@ func (sys *System) View(ctx context.Context, vcfg VolumeConfig, fn func(*Tx) err
 		return err
 	}
 	fqoid := blobcache.FQOID{OID: volh.OID, Node: ep.Node}
-	txn2, err := sys.wrapTx(ctx, txn, fqoid, vcfg.HashAlgo)
+	privKey, err := parseVolumePrivateKey(&sys.pki, vcfg)
+	if err != nil {
+		return err
+	}
+	txn2, err := sys.wrapTx(ctx, txn, fqoid, vcfg.HashAlgo, privKey)
 	if err != nil {
 		return err
 	}
@@ -238,7 +253,11 @@ func (sys *System) Modify(ctx context.Context, vcfg VolumeConfig, fn func(*Tx) e
 		return err
 	}
 	fqoid := blobcache.FQOID{OID: volh.OID, Node: ep.Node}
-	txn2, err := sys.wrapTx(ctx, txn, fqoid, vcfg.HashAlgo)
+	privKey, err := parseVolumePrivateKey(&sys.pki, vcfg)
+	if err != nil {
+		return err
+	}
+	txn2, err := sys.wrapTx(ctx, txn, fqoid, vcfg.HashAlgo, privKey)
 	if err != nil {
 		return err
 	}
@@ -277,6 +296,10 @@ func (sys *System) NewEmpty(ctx context.Context, txn *bcsdk.Tx, fp FSParams) (FS
 	if err != nil {
 		return FSState{}, err
 	}
+	lockRoot, err := mach.lockkv.NewEmpty(ctx, txn)
+	if err != nil {
+		return FSState{}, err
+	}
 	return FSState{
 		version:     0,
 		maxBlobSize: fp.MaxBlobSize,
@@ -285,6 +308,7 @@ func (sys *System) NewEmpty(ctx context.Context, txn *bcsdk.Tx, fp FSParams) (FS
 		inodes:      inodeRoot,
 		xattrs:      xattrRoot,
 		sessions:    sessionRoot,
+		locks:       lockRoot,
 	}, nil
 }
 
@@ -302,13 +326,13 @@ func (sys *System) getMachs(fqoid blobcache.FQOID, fp FSParams) *machines {
 	return machs
 }
 
-func (sys *System) wrapTx(ctx context.Context, txn *bcsdk.Tx, fqoid blobcache.FQOID, hashAlgo blobcache.HashAlgo) (*Tx, error) {
+func (sys *System) wrapTx(ctx context.Context, txn *bcsdk.Tx, fqoid blobcache.FQOID, hashAlgo blobcache.HashAlgo, privKey inet256.PrivateKey) (*Tx, error) {
 	root, err := LoadState(ctx, txn)
 	if err != nil {
 		return nil, err
 	}
 	machs := sys.getMachs(fqoid, FSParams{HashAlgo: hashAlgo, GID: root.gid, MaxBlobSize: root.maxBlobSize, Salt: root.salt})
-	return newTx(root, txn, txn, machs, &sys.pki), nil
+	return newTx(root, txn, txn, machs, &sys.pki, privKey), nil
 }
 
 type Linker interface {
@@ -325,11 +349,13 @@ type Tx struct {
 	link Linker
 	gid  [32]byte
 	pki  *inet256.PKI
+	priv inet256.PrivateKey
 
 	fdata      *gdat.Machine
 	inodetx    *gotkv.Tx
 	xattrtx    *gotkv.Tx
 	sessiontx  *gotkv.Tx
+	locktx     *gotkv.Tx
 	inodeCache map[INode]wfscnp.Node
 }
 
@@ -337,7 +363,7 @@ type INodeStats struct {
 	RefCount uint32
 }
 
-func newTx(prev FSState, s bcsdk.RW, link Linker, machs *machines, pki *inet256.PKI) *Tx {
+func newTx(prev FSState, s bcsdk.RW, link Linker, machs *machines, pki *inet256.PKI, priv inet256.PrivateKey) *Tx {
 	return &Tx{
 		prev: prev,
 		ros:  s,
@@ -345,12 +371,22 @@ func newTx(prev FSState, s bcsdk.RW, link Linker, machs *machines, pki *inet256.
 		link: link,
 		gid:  prev.gid,
 		pki:  pki,
+		priv: priv,
 
 		fdata:     &machs.fdata,
 		inodetx:   machs.inodekv.NewTx(s, prev.inodes),
 		xattrtx:   machs.xattrkv.NewTx(s, prev.xattrs),
 		sessiontx: machs.sessionkv.NewTx(s, prev.sessions),
+		locktx:    machs.lockkv.NewTx(s, prev.locks),
 	}
+}
+
+func parseVolumePrivateKey(pki *inet256.PKI, vcfg VolumeConfig) (inet256.PrivateKey, error) {
+	data, err := hex.DecodeString(vcfg.PrivateKeyHex)
+	if err != nil {
+		return nil, err
+	}
+	return pki.ParsePrivateKey(data)
 }
 
 // Flush writes out the changes to the store and returns a new root.
@@ -367,9 +403,14 @@ func (tx *Tx) Flush(ctx context.Context) (FSState, error) {
 	if err != nil {
 		return FSState{}, err
 	}
+	lockkvroot, err := tx.locktx.Flush(ctx)
+	if err != nil {
+		return FSState{}, err
+	}
 	tx.prev.inodes = inodekvroot
 	tx.prev.xattrs = xattrkvroot
 	tx.prev.sessions = sessionkvroot
+	tx.prev.locks = lockkvroot
 	return tx.prev, nil
 }
 

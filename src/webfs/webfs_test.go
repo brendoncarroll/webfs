@@ -2,6 +2,7 @@ package webfs
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -10,7 +11,6 @@ import (
 
 	"blobcache.io/blobcache/src/bclocal"
 	"blobcache.io/blobcache/src/blobcache"
-	capnp "capnproto.org/go/capnp/v3"
 	"github.com/brendoncarroll/webfs/src/internal/wfscnp"
 	"github.com/stretchr/testify/require"
 	"go.brendoncarroll.net/tai64"
@@ -214,15 +214,20 @@ func TestSessions(t *testing.T) {
 func TestGCSessions(t *testing.T) {
 	ctx := context.Background()
 	sys, vcfg := setupVol(t)
-	var expiredID, activeID, immortalID inet256.ID
-	expiredID[0] = 1
-	activeID[0] = 2
-	immortalID[0] = 3
+	_, expiredPriv, err := sys.pki.GenerateKey()
+	require.NoError(t, err)
+	expiredID := sys.pki.NewID(inet256.PublicFromPrivate(expiredPriv))
+	_, activePriv, err := sys.pki.GenerateKey()
+	require.NoError(t, err)
+	activeID := sys.pki.NewID(inet256.PublicFromPrivate(activePriv))
+	_, immortalPriv, err := sys.pki.GenerateKey()
+	require.NoError(t, err)
+	immortalID := sys.pki.NewID(inet256.PublicFromPrivate(immortalPriv))
 
 	require.NoError(t, sys.Modify(ctx, vcfg, func(tx *Tx) error {
-		require.NoError(t, putTestSession(ctx, tx, expiredID, tai64.TAI64N{Seconds: 1}, 1))
-		require.NoError(t, putTestSession(ctx, tx, activeID, tai64.Now(), 3600))
-		require.NoError(t, putTestSession(ctx, tx, immortalID, tai64.TAI64N{Seconds: 1}, 0))
+		require.NoError(t, putTestSession(ctx, tx, expiredPriv, tai64.TAI64N{Seconds: 1}, 1))
+		require.NoError(t, putTestSession(ctx, tx, activePriv, tai64.Now(), 3600))
+		require.NoError(t, putTestSession(ctx, tx, immortalPriv, tai64.TAI64N{Seconds: 1}, 0))
 
 		require.NoError(t, tx.GCSessions(ctx))
 		requireSessionMissing(t, ctx, tx, expiredID)
@@ -232,19 +237,60 @@ func TestGCSessions(t *testing.T) {
 	}))
 }
 
+func TestLocks(t *testing.T) {
+	ctx := context.Background()
+	sys, vcfg := setupVol(t)
+	privKeyData, err := hex.DecodeString(vcfg.PrivateKeyHex)
+	require.NoError(t, err)
+	privKey1, err := sys.pki.ParsePrivateKey(privKeyData)
+	require.NoError(t, err)
+	pubKey1 := inet256.PublicFromPrivate(privKey1)
+	id1 := sys.pki.NewID(pubKey1)
+	var fileIno INode
+
+	require.NoError(t, sys.Modify(ctx, vcfg, func(tx *Tx) error {
+		ino, err := tx.CreateFileAt(ctx, rootINode(), "locked", 0o644, FileParams{
+			Now:       tai64.Now(),
+			BlockSize: 4096,
+		})
+		require.NoError(t, err)
+		fileIno = ino
+
+		_, err = tx.ensureSession(ctx, privKey1, tai64.Now())
+		require.NoError(t, err)
+		require.NoError(t, tx.addLock(ctx, id1, fileIno, LockKindRead, 0, 100))
+		lock1, err := tx.getLock(ctx, fileIno, id1)
+		require.NoError(t, err)
+		require.Equal(t, uint16(LockKindRead), lock1.Kind())
+		require.Equal(t, uint64(0), lock1.Start())
+		require.Equal(t, uint64(100), lock1.Length())
+		require.Equal(t, uint32(1), requireSessionValue(t, ctx, sys, tx, pubKey1, id1).LockCount())
+
+		err = tx.addLock(ctx, id1, fileIno, LockKindRead, 0, 100)
+		require.Error(t, err)
+
+		err = tx.addLock(ctx, id1, fileIno, LockKindWrite, 50, 100)
+		require.Error(t, err)
+
+		require.NoError(t, tx.removeLock(ctx, id1, fileIno))
+		require.Equal(t, uint32(0), requireSessionValue(t, ctx, sys, tx, pubKey1, id1).LockCount())
+		_, err = tx.getLock(ctx, fileIno, id1)
+		require.ErrorIs(t, err, fs.ErrNotExist)
+		require.NoError(t, tx.addLock(ctx, id1, fileIno, LockKindWrite, 0, 0))
+		require.Equal(t, uint32(1), requireSessionValue(t, ctx, sys, tx, pubKey1, id1).LockCount())
+		require.NoError(t, tx.dropSession(ctx, id1))
+		requireSessionMissing(t, ctx, tx, id1)
+		_, err = tx.getLock(ctx, fileIno, id1)
+		require.ErrorIs(t, err, fs.ErrNotExist)
+		return nil
+	}))
+}
+
 func requireSessionValue(t testing.TB, ctx context.Context, sys *System, tx *Tx, pubKey inet256.PublicKey, id inet256.ID) wfscnp.Session {
 	t.Helper()
-	var value []byte
-	exists, err := tx.sessiontx.Get(ctx, id[:], &value)
+	session, err := tx.getSession(ctx, id)
 	require.NoError(t, err)
-	require.True(t, exists)
-	sessionData, sig, err := parseSessionValue(value)
-	require.NoError(t, err)
-	require.True(t, sys.pki.Verify(&sessionSigCtx, pubKey, sessionSigMessage(tx.gid, sessionData), sig))
-	msg, err := capnp.Unmarshal(sessionData)
-	require.NoError(t, err)
-	session, err := wfscnp.ReadRootSession(msg)
-	require.NoError(t, err)
+	require.Equal(t, id, sys.pki.NewID(pubKey))
 	return session
 }
 
@@ -255,28 +301,26 @@ func readCNPTime(t testing.TB, get func() (wfscnp.TAI64N, error)) tai64.TAI64N {
 	return tai64.TAI64N{Seconds: actual.Seconds(), Nanoseconds: actual.Nanoseconds()}
 }
 
-func putTestSession(ctx context.Context, tx *Tx, id inet256.ID, touchedAt tai64.TAI64N, ttl uint32) error {
-	_, seg := capnp.NewSingleSegmentMessage(nil)
-	session, err := wfscnp.NewRootSession(seg)
+func putTestSession(ctx context.Context, tx *Tx, privKey inet256.PrivateKey, touchedAt tai64.TAI64N, ttl uint32) error {
+	id, err := tx.ensureSession(ctx, privKey, touchedAt)
 	if err != nil {
 		return err
 	}
-	createdAt, err := session.NewCreateAt()
-	if err != nil {
-		return err
-	}
-	setCNPTime(createdAt, touchedAt)
-	touchedAtCNP, err := session.NewTouchedAt()
-	if err != nil {
-		return err
-	}
-	setCNPTime(touchedAtCNP, touchedAt)
-	session.SetTtl(ttl)
-	sessionData, err := session.Message().Marshal()
-	if err != nil {
-		return err
-	}
-	return tx.sessiontx.Put(ctx, id[:], makeSessionValue(nil, sessionData, nil))
+	_, err = tx.editSession(ctx, id, privKey, func(session wfscnp.Session) error {
+		createAt, err := session.CreateAt()
+		if err != nil {
+			return err
+		}
+		setCNPTime(createAt, touchedAt)
+		touchedAtCNP, err := session.TouchedAt()
+		if err != nil {
+			return err
+		}
+		setCNPTime(touchedAtCNP, touchedAt)
+		session.SetTtl(ttl)
+		return nil
+	})
+	return err
 }
 
 func requireSessionExists(t testing.TB, ctx context.Context, tx *Tx, id inet256.ID) {

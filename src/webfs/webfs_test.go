@@ -246,6 +246,7 @@ func TestLocks(t *testing.T) {
 	require.NoError(t, err)
 	pubKey1 := inet256.PublicFromPrivate(privKey1)
 	id1 := sys.pki.NewID(pubKey1)
+	const owner1 uint64 = 1
 	var fileIno INode
 
 	require.NoError(t, sys.Modify(ctx, vcfg, func(tx *Tx) error {
@@ -258,30 +259,169 @@ func TestLocks(t *testing.T) {
 
 		_, err = tx.ensureSession(ctx, privKey1, tai64.Now())
 		require.NoError(t, err)
-		require.NoError(t, tx.addLock(ctx, id1, fileIno, LockKindRead, 0, 100))
-		lock1, err := tx.getLock(ctx, fileIno, id1)
+		require.NoError(t, tx.addLock(ctx, id1, owner1, fileIno, LockKindRead, 0, 100))
+		lock1, err := tx.getLock(ctx, fileIno, id1, owner1)
 		require.NoError(t, err)
 		require.Equal(t, uint16(LockKindRead), lock1.Kind())
 		require.Equal(t, uint64(0), lock1.Start())
 		require.Equal(t, uint64(100), lock1.Length())
 		require.Equal(t, uint32(1), requireSessionValue(t, ctx, sys, tx, pubKey1, id1).LockCount())
 
-		err = tx.addLock(ctx, id1, fileIno, LockKindRead, 0, 100)
+		err = tx.addLock(ctx, id1, owner1, fileIno, LockKindRead, 0, 100)
 		require.Error(t, err)
 
-		err = tx.addLock(ctx, id1, fileIno, LockKindWrite, 50, 100)
+		err = tx.addLock(ctx, id1, owner1, fileIno, LockKindWrite, 50, 100)
 		require.Error(t, err)
 
-		require.NoError(t, tx.removeLock(ctx, id1, fileIno))
+		require.NoError(t, tx.removeLock(ctx, id1, owner1, fileIno))
 		require.Equal(t, uint32(0), requireSessionValue(t, ctx, sys, tx, pubKey1, id1).LockCount())
-		_, err = tx.getLock(ctx, fileIno, id1)
+		_, err = tx.getLock(ctx, fileIno, id1, owner1)
 		require.ErrorIs(t, err, fs.ErrNotExist)
-		require.NoError(t, tx.addLock(ctx, id1, fileIno, LockKindWrite, 0, 0))
+		require.NoError(t, tx.addLock(ctx, id1, owner1, fileIno, LockKindWrite, 0, 0))
 		require.Equal(t, uint32(1), requireSessionValue(t, ctx, sys, tx, pubKey1, id1).LockCount())
 		require.NoError(t, tx.dropSession(ctx, id1))
 		requireSessionMissing(t, ctx, tx, id1)
-		_, err = tx.getLock(ctx, fileIno, id1)
+		_, err = tx.getLock(ctx, fileIno, id1, owner1)
 		require.ErrorIs(t, err, fs.ErrNotExist)
+		return nil
+	}))
+}
+
+func TestLocksConflict(t *testing.T) {
+	tests := []struct {
+		name    string
+		kindA   LockKind
+		startA  uint64
+		lengthA uint64
+		kindB   LockKind
+		startB  uint64
+		lengthB uint64
+		want    bool
+	}{
+		{
+			name:    "read_read_overlap_no_conflict",
+			kindA:   LockKindRead,
+			startA:  0,
+			lengthA: 100,
+			kindB:   LockKindRead,
+			startB:  50,
+			lengthB: 100,
+			want:    false,
+		},
+		{
+			name:    "read_write_overlap_conflict",
+			kindA:   LockKindRead,
+			startA:  0,
+			lengthA: 100,
+			kindB:   LockKindWrite,
+			startB:  50,
+			lengthB: 100,
+			want:    true,
+		},
+		{
+			name:    "write_write_overlap_conflict",
+			kindA:   LockKindWrite,
+			startA:  0,
+			lengthA: 100,
+			kindB:   LockKindWrite,
+			startB:  99,
+			lengthB: 1,
+			want:    true,
+		},
+		{
+			name:    "adjacent_ranges_do_not_conflict",
+			kindA:   LockKindWrite,
+			startA:  0,
+			lengthA: 100,
+			kindB:   LockKindWrite,
+			startB:  100,
+			lengthB: 25,
+			want:    false,
+		},
+		{
+			name:    "disjoint_ranges_do_not_conflict",
+			kindA:   LockKindWrite,
+			startA:  10,
+			lengthA: 10,
+			kindB:   LockKindRead,
+			startB:  100,
+			lengthB: 10,
+			want:    false,
+		},
+		{
+			name:    "open_ended_lock_conflicts_with_later_range",
+			kindA:   LockKindWrite,
+			startA:  10,
+			lengthA: 0,
+			kindB:   LockKindRead,
+			startB:  100,
+			lengthB: 10,
+			want:    true,
+		},
+		{
+			name:    "range_before_open_ended_lock_no_conflict",
+			kindA:   LockKindWrite,
+			startA:  0,
+			lengthA: 10,
+			kindB:   LockKindWrite,
+			startB:  10,
+			lengthB: 0,
+			want:    false,
+		},
+		{
+			name:    "open_ended_overlap_conflicts",
+			kindA:   LockKindWrite,
+			startA:  10,
+			lengthA: 0,
+			kindB:   LockKindWrite,
+			startB:  10,
+			lengthB: 0,
+			want:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, locksConflict(tt.kindA, tt.startA, tt.lengthA, tt.kindB, tt.startB, tt.lengthB))
+			require.Equal(t, tt.want, locksConflict(tt.kindB, tt.startB, tt.lengthB, tt.kindA, tt.startA, tt.lengthA))
+		})
+	}
+}
+
+func TestFindConflictingLockOwners(t *testing.T) {
+	ctx := context.Background()
+	sys, vcfg := setupVol(t)
+	privKeyData, err := hex.DecodeString(vcfg.PrivateKeyHex)
+	require.NoError(t, err)
+	privKey, err := sys.pki.ParsePrivateKey(privKeyData)
+	require.NoError(t, err)
+	id := sys.pki.NewID(inet256.PublicFromPrivate(privKey))
+	const owner1 uint64 = 1
+	const owner2 uint64 = 2
+
+	require.NoError(t, sys.Modify(ctx, vcfg, func(tx *Tx) error {
+		ino, err := tx.CreateFileAt(ctx, rootINode(), "locked", 0o644, FileParams{
+			Now:       tai64.Now(),
+			BlockSize: 4096,
+		})
+		require.NoError(t, err)
+		_, err = tx.ensureSession(ctx, privKey, tai64.Now())
+		require.NoError(t, err)
+		require.NoError(t, tx.addLock(ctx, id, owner1, ino, LockKindWrite, 0, 100))
+
+		conflict, err := tx.findConflictingLock(ctx, ino, id, owner1, LockKindWrite, 0, 100)
+		require.NoError(t, err)
+		require.Nil(t, conflict)
+
+		conflict, err = tx.findConflictingLock(ctx, ino, id, owner2, LockKindWrite, 0, 100)
+		require.NoError(t, err)
+		require.NotNil(t, conflict)
+		require.Equal(t, owner1, conflict.Owner)
+		require.Equal(t, id, conflict.SessionID)
+
+		conflict, err = tx.findConflictingLock(ctx, ino, id, owner2, LockKindRead, 100, 10)
+		require.NoError(t, err)
+		require.Nil(t, conflict)
 		return nil
 	}))
 }

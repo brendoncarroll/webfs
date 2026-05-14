@@ -6,9 +6,12 @@ import (
 
 	bcclient "blobcache.io/blobcache/client/go"
 	"blobcache.io/blobcache/src/blobcache"
+	"github.com/cloudflare/circl/sign"
+	"github.com/cloudflare/circl/sign/mldsa/mldsa87"
 	"github.com/brendoncarroll/webfs/src/webfs"
 	"github.com/brendoncarroll/webfs/src/webfsfuse"
 	"github.com/hanwen/go-fuse/v2/fs"
+	"go.inet256.org/inet256/src/inet256"
 	"go.brendoncarroll.net/star"
 )
 
@@ -34,8 +37,9 @@ var mountCmd = star.Command{
 		if err != nil {
 			return err
 		}
-		sys := webfs.NewSystem(bc)
-		fsys := webfsfuse.New(sys, cfg)
+		pki := inet256.PKI{Default: "mldsa87", Schemes: map[string]sign.Scheme{"mldsa87": mldsa87.Scheme()}}
+		sys := webfs.NewSystemWithPKI(bc, pki)
+		fsys := webfsfuse.New(sys, pki, cfg)
 		node := fsys.Root()
 		srv, err := fs.Mount(mountDirParam.Load(c), node, nil)
 		if err != nil {

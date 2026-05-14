@@ -27,17 +27,17 @@ type FileParams struct {
 }
 
 func (tx *Tx) CreateFileAt(ctx context.Context, parent INode, name string, mode fs.FileMode, fp FileParams) (INode, error) {
-	ino, err := tx.createFile(ctx, fp)
+	ino, err := tx.createFile(ctx, fp, mode)
 	if err != nil {
 		return INode{}, err
 	}
-	if err := tx.Link(ctx, parent, name, mode, ino); err != nil {
+	if err := tx.Link(ctx, parent, name, ino); err != nil {
 		return INode{}, err
 	}
 	return ino, nil
 }
 
-func (tx *Tx) createFile(ctx context.Context, fp FileParams) (INode, error) {
+func (tx *Tx) createFile(ctx context.Context, fp FileParams, mode fs.FileMode) (INode, error) {
 	if fp.BlockSize == 0 {
 		return INode{}, fmt.Errorf("block size must be > 0")
 	}
@@ -47,7 +47,7 @@ func (tx *Tx) createFile(ctx context.Context, fp FileParams) (INode, error) {
 		return INode{}, err
 	}
 	node.SetRefCount(0)
-	node.SetRev(0)
+	setNodeMode(node, mode&(fs.ModeType|0o7777))
 	createdAt, err := node.NewCreatedAt()
 	if err != nil {
 		return INode{}, err
@@ -87,6 +87,49 @@ func (tx *Tx) getFile(ctx context.Context, ino INode) (wfscnp.File, wfscnp.Node,
 		return wfscnp.File{}, wfscnp.Node{}, err
 	}
 	return file, node, nil
+}
+
+func setNodeMode(node wfscnp.Node, mode fs.FileMode) {
+	node.SetMode(uint32(mode))
+}
+
+func nodeMode(node wfscnp.Node) fs.FileMode {
+	mode := fs.FileMode(node.Mode())
+	if mode != 0 {
+		return mode
+	}
+	switch node.Payload().Which() {
+	case wfscnp.Node_payload_Which_dir:
+		return fs.ModeDir | 0o755
+	case wfscnp.Node_payload_Which_file:
+		return 0o644
+	default:
+		return 0o644
+	}
+}
+
+func (tx *Tx) GetMode(ctx context.Context, ino INode) (fs.FileMode, error) {
+	node, err := tx.getNode(ctx, ino)
+	if err != nil {
+		return 0, err
+	}
+	mode := nodeMode(node)
+	if node.Payload().Which() == wfscnp.Node_payload_Which_dir {
+		mode |= fs.ModeDir
+	}
+	return mode, nil
+}
+
+func (tx *Tx) SetMode(ctx context.Context, ino INode, mode fs.FileMode) error {
+	node, err := tx.getNode(ctx, ino)
+	if err != nil {
+		return err
+	}
+	if node.Payload().Which() == wfscnp.Node_payload_Which_dir {
+		mode |= fs.ModeDir
+	}
+	setNodeMode(node, mode)
+	return tx.putNode(ctx, ino, node)
 }
 
 func (tx *Tx) StatFile(ctx context.Context, ino INode) (FileInfo, error) {

@@ -23,6 +23,7 @@ struct Node {
   modifiedAt @1 :TAI64N;
   refCount @2 :UInt32;
   rev @3 :UInt64;
+  mode @7: UInt32;
 
   payload :union {
     file @4 :File;

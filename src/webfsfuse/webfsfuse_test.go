@@ -25,7 +25,6 @@ func TestPOSIX(t *testing.T) {
 		"NlinkZero":       "nlink behavior for overwritten open files is not implemented yet",
 		"OpenSymlinkRace": "symlink race-hardening semantics are not implemented yet",
 		"RenameOpenDir":   "rename-over-directory semantics are not implemented yet",
-		"XAttr":           "xattr operations are not implemented yet",
 	}
 	parallel := map[string]struct{}{
 		"FcntlFlockLocksFile": {},

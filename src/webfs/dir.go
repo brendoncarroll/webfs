@@ -210,7 +210,8 @@ func (tx *Tx) decRef(ctx context.Context, ino INode) error {
 			return err
 		}
 		for i := 0; i < n; i++ {
-			if err := tx.inodetx.Delete(ctx, buf[i].Key); err != nil {
+			// TODO: remove when fixed upstream; gotkv.Tx.Delete retains the key slice.
+			if err := tx.inodetx.Delete(ctx, append([]byte(nil), buf[i].Key...)); err != nil {
 				return err
 			}
 		}

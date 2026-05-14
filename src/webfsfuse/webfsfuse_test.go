@@ -20,11 +20,13 @@ import (
 
 func TestPOSIX(t *testing.T) {
 	blacklist := map[string]string{
-		"FdLeak":          "counts backend service descriptors that are unrelated to FUSE file-handle leaks",
-		"FstatDeleted":    "deleted-open-file inode semantics are not implemented yet",
-		"NlinkZero":       "nlink behavior for overwritten open files is not implemented yet",
+		// This is the only okay skip, we run Blobcache in-process which opens files
+		"FdLeak": "counts backend service descriptors that are unrelated to FUSE file-handle leaks",
+		// TODO: these changes require a sesison handles table in webfs
+		"FstatDeleted": "deleted-open-file inode semantics are not implemented yet",
+		"NlinkZero":    "nlink behavior for overwritten open files is not implemented yet",
+
 		"OpenSymlinkRace": "symlink race-hardening semantics are not implemented yet",
-		"RenameOpenDir":   "rename-over-directory semantics are not implemented yet",
 	}
 	parallel := map[string]struct{}{
 		"FcntlFlockLocksFile": {},

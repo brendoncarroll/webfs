@@ -7,10 +7,12 @@ import (
 	iofs "io/fs"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/brendoncarroll/webfs/src/webfs"
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
+	"golang.org/x/sys/unix"
 	"go.brendoncarroll.net/tai64"
 )
 
@@ -27,6 +29,12 @@ var _ = (fs.NodeOpener)((*Node)(nil))
 var _ = (fs.NodeReader)((*Node)(nil))
 var _ = (fs.NodeWriter)((*Node)(nil))
 var _ = (fs.NodeSetattrer)((*Node)(nil))
+var _ = (fs.NodeLinker)((*Node)(nil))
+var _ = (fs.NodeRenamer)((*Node)(nil))
+var _ = (fs.NodeSymlinker)((*Node)(nil))
+var _ = (fs.NodeReadlinker)((*Node)(nil))
+var _ = (fs.NodeAllocater)((*Node)(nil))
+var _ = (fs.NodeLseeker)((*Node)(nil))
 var _ = (fs.NodeUnlinker)((*Node)(nil))
 var _ = (fs.NodeRmdirer)((*Node)(nil))
 
@@ -43,6 +51,7 @@ type Node struct {
 
 	mu   sync.RWMutex
 	size uint64
+	mtime time.Time
 }
 
 func NewRoot(sys *webfs.System, rootCfg webfs.VolumeConfig) *Node {
@@ -69,8 +78,19 @@ func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs
 
 func (n *Node) Getattr(ctx context.Context, _ fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
 	out.Mode = fuseMode(n.mode)
-	if !n.mode.IsDir() {
-		out.Size = n.getSize()
+	if !n.mode.IsDir() || n.mode&iofs.ModeSymlink != 0 {
+		if sz, links, errno := n.refreshStats(ctx); errno != 0 {
+			return errno
+		} else {
+			out.Size = sz
+			out.Nlink = links
+		}
+	}
+	n.mu.RLock()
+	mtime := n.mtime
+	n.mu.RUnlock()
+	if !mtime.IsZero() {
+		out.SetTimes(nil, &mtime, nil)
 	}
 	return 0
 }
@@ -128,7 +148,7 @@ func (n *Node) Create(ctx context.Context, name string, _ uint32, mode uint32, o
 }
 
 func (n *Node) Open(_ context.Context, flags uint32) (fs.FileHandle, uint32, syscall.Errno) {
-	if n.mode.IsDir() {
+	if n.mode.IsDir() || n.mode&iofs.ModeSymlink != 0 {
 		return nil, 0, syscall.EISDIR
 	}
 	return &fileHandle{append: flags&syscall.O_APPEND != 0}, 0, 0
@@ -185,9 +205,167 @@ func (n *Node) Setattr(ctx context.Context, _ fs.FileHandle, in *fuse.SetAttrIn,
 		}
 		n.setSize(sz)
 	}
+	if mtime, ok := in.GetMTime(); ok {
+		n.mu.Lock()
+		n.mtime = mtime
+		n.mu.Unlock()
+	}
 	out.Mode = fuseMode(n.mode)
 	out.Size = n.getSize()
+	n.mu.RLock()
+	mtime := n.mtime
+	n.mu.RUnlock()
+	if !mtime.IsZero() {
+		out.SetTimes(nil, &mtime, nil)
+	}
 	return 0
+}
+
+func (n *Node) Link(ctx context.Context, target fs.InodeEmbedder, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	targetNode, ok := target.(*Node)
+	if !ok {
+		if op, ok := target.EmbeddedInode().Operations().(*Node); ok {
+			targetNode = op
+		} else {
+			return nil, syscall.EINVAL
+		}
+	}
+	err := n.sys.Modify(ctx, n.rootCfg, func(tx *webfs.Tx) error {
+		return tx.Link(ctx, n.ino, name, targetNode.mode, targetNode.ino)
+	})
+	if err != nil {
+		return nil, toErrno(err)
+	}
+	out.Mode = fuseMode(targetNode.mode)
+	if !targetNode.mode.IsDir() || targetNode.mode&iofs.ModeSymlink != 0 {
+		sz, links, errno := targetNode.refreshStats(ctx)
+		if errno != 0 {
+			return nil, errno
+		}
+		out.Size = sz
+		out.Nlink = links
+	}
+	return targetNode.EmbeddedInode(), 0
+}
+
+func (n *Node) Rename(ctx context.Context, name string, newParent fs.InodeEmbedder, newName string, flags uint32) syscall.Errno {
+	if flags != 0 {
+		return syscall.ENOTSUP
+	}
+	np, ok := newParent.(*Node)
+	if !ok {
+		if op, ok := newParent.EmbeddedInode().Operations().(*Node); ok {
+			np = op
+		} else {
+			return syscall.EINVAL
+		}
+	}
+	err := n.sys.Modify(ctx, n.rootCfg, func(tx *webfs.Tx) error {
+		return tx.Rename(ctx, n.ino, name, np.ino, newName)
+	})
+	if err != nil {
+		return toErrno(err)
+	}
+	return 0
+}
+
+func (n *Node) Symlink(ctx context.Context, target, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	var ino webfs.INode
+	mode := iofs.ModeSymlink | 0o777
+	err := n.sys.Modify(ctx, n.rootCfg, func(tx *webfs.Tx) error {
+		var err error
+		ino, err = tx.CreateFileAt(ctx, n.ino, name, mode, webfs.FileParams{Now: tai64.Now(), BlockSize: 4096})
+		if err != nil {
+			return err
+		}
+		return tx.WriteAt(ctx, ino, 0, []byte(target))
+	})
+	if err != nil {
+		return nil, toErrno(err)
+	}
+	child, errno := n.newChild(ctx, ino, mode, out)
+	if errno != 0 {
+		return nil, errno
+	}
+	return child, 0
+}
+
+func (n *Node) Readlink(ctx context.Context) ([]byte, syscall.Errno) {
+	if n.mode&iofs.ModeSymlink == 0 {
+		return nil, syscall.EINVAL
+	}
+	var out []byte
+	err := n.sys.View(ctx, n.rootCfg, func(tx *webfs.Tx) error {
+		st, err := tx.StatFile(ctx, n.ino)
+		if err != nil {
+			return err
+		}
+		buf := make([]byte, st.Size)
+		_, err = tx.ReadAt(ctx, n.ino, 0, buf)
+		if errors.Is(err, io.EOF) {
+			err = nil
+		}
+		if err != nil {
+			return err
+		}
+		out = buf
+		return nil
+	})
+	if err != nil {
+		return nil, toErrno(err)
+	}
+	return out, 0
+}
+
+func (n *Node) Allocate(ctx context.Context, _ fs.FileHandle, off uint64, size uint64, mode uint32) syscall.Errno {
+	if mode&unix.FALLOC_FL_KEEP_SIZE != 0 {
+		return 0
+	}
+	end := off + size
+	err := n.sys.Modify(ctx, n.rootCfg, func(tx *webfs.Tx) error {
+		st, err := tx.StatFile(ctx, n.ino)
+		if err != nil {
+			return err
+		}
+		if end <= st.Size {
+			return nil
+		}
+		return tx.Truncate(ctx, n.ino, end)
+	})
+	if err != nil {
+		return toErrno(err)
+	}
+	n.setSize(end)
+	return 0
+}
+
+func (n *Node) Lseek(ctx context.Context, _ fs.FileHandle, off uint64, whence uint32) (uint64, syscall.Errno) {
+	var sz uint64
+	err := n.sys.View(ctx, n.rootCfg, func(tx *webfs.Tx) error {
+		st, err := tx.StatFile(ctx, n.ino)
+		if err != nil {
+			return err
+		}
+		sz = st.Size
+		return nil
+	})
+	if err != nil {
+		return 0, toErrno(err)
+	}
+	switch whence {
+	case unix.SEEK_DATA:
+		if off >= sz {
+			return 0, syscall.ENXIO
+		}
+		return off, 0
+	case unix.SEEK_HOLE:
+		if off > sz {
+			return 0, syscall.ENXIO
+		}
+		return sz, 0
+	default:
+		return 0, syscall.EINVAL
+	}
 }
 
 func (n *Node) Unlink(ctx context.Context, name string) syscall.Errno {
@@ -237,12 +415,15 @@ func (n *Node) newChild(ctx context.Context, ino webfs.INode, mode iofs.FileMode
 		ino:     ino,
 		mode:    mode,
 	}
-	if !mode.IsDir() {
-		sz, err := op.statFileSize(ctx)
-		if err != nil {
-			return nil, toErrno(err)
+	if mode.IsDir() {
+		out.Nlink = 1
+	} else {
+		sz, links, errno := op.refreshStats(ctx)
+		if errno != 0 {
+			return nil, errno
 		}
 		op.setSize(sz)
+		out.Nlink = links
 	}
 	out.Mode = fuseMode(mode)
 	out.Size = op.getSize()
@@ -289,10 +470,41 @@ func fuseIno(ino webfs.INode) uint64 {
 
 func fuseMode(mode iofs.FileMode) uint32 {
 	perm := uint32(mode.Perm())
+	if mode&iofs.ModeSymlink != 0 {
+		return syscall.S_IFLNK | perm
+	}
 	if mode.IsDir() {
 		return syscall.S_IFDIR | perm
 	}
 	return syscall.S_IFREG | perm
+}
+
+func (n *Node) refreshStats(ctx context.Context) (uint64, uint32, syscall.Errno) {
+	var size uint64
+	var links uint32 = 1
+	err := n.sys.View(ctx, n.rootCfg, func(tx *webfs.Tx) error {
+		st, err := tx.StatINode(ctx, n.ino)
+		if err != nil {
+			return err
+		}
+		links = st.RefCount
+		if !n.mode.IsDir() || n.mode&iofs.ModeSymlink != 0 {
+			f, err := tx.StatFile(ctx, n.ino)
+			if err != nil {
+				return err
+			}
+			size = f.Size
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, 0, toErrno(err)
+	}
+	if links == 0 {
+		links = 1
+	}
+	n.setSize(size)
+	return size, links, 0
 }
 
 func toErrno(err error) syscall.Errno {

@@ -24,6 +24,7 @@ type VolumeConfig struct {
 	NodeID        blobcache.NodeID   `json:"node"`
 	VolumeID      blobcache.OID      `json:"volume"`
 	HashAlgo      blobcache.HashAlgo `json:"hash_algo"`
+	GID           [32]byte           `json:"gid"`
 	DEK           blobcache.DEK      `json:"dek"`
 	PrivateKeyHex string             `json:"private_key"`
 }
@@ -39,13 +40,16 @@ type machines struct {
 	inodekv gotkv.Machine
 	// xattrkv manages interactions with the xattrs table.
 	xattrkv gotkv.Machine
+	// sessionkv manages interactions with the sessions table.
+	sessionkv gotkv.Machine
 }
 
 func newMachines(fp FSParams) *machines {
 	const (
-		filedata = "filedata"
-		inodekv  = "inodekv"
-		xattrkv  = "xattrkv"
+		filedata  = "filedata"
+		inodekv   = "inodekv"
+		xattrkv   = "xattrkv"
+		sessionkv = "sessionkv"
 	)
 	var dataSalt [32]byte
 	gdat.DeriveKey(dataSalt[:], &fp.Salt, []byte(filedata))
@@ -53,6 +57,8 @@ func newMachines(fp FSParams) *machines {
 	gdat.DeriveKey(inokvSalt[:], &fp.Salt, []byte(inodekv))
 	var xattrkvSalt [32]byte
 	gdat.DeriveKey(xattrkvSalt[:], &fp.Salt, []byte(xattrkv))
+	var sessionkvSalt [32]byte
+	gdat.DeriveKey(sessionkvSalt[:], &fp.Salt, []byte(sessionkv))
 	return &machines{
 		fdata: *gdat.NewMachine(gdat.Params{
 			Salt:          dataSalt,
@@ -66,6 +72,12 @@ func newMachines(fp FSParams) *machines {
 		}),
 		xattrkv: gotkv.NewMachine(gotkv.Params{
 			Salt:          xattrkvSalt,
+			MaxSize:       int(fp.MaxBlobSize),
+			MeanSize:      1 << 13,
+			KeyedHashFunc: fp.HashAlgo.KeyedHash,
+		}),
+		sessionkv: gotkv.NewMachine(gotkv.Params{
+			Salt:          sessionkvSalt,
 			MaxSize:       int(fp.MaxBlobSize),
 			MeanSize:      1 << 13,
 			KeyedHashFunc: fp.HashAlgo.KeyedHash,
@@ -126,8 +138,11 @@ func (sys *System) Initialize(ctx context.Context, volh blobcache.Handle) (Volum
 		}
 		var salt [32]byte
 		rand.Read(salt[:])
+		var gid [32]byte
+		rand.Read(gid[:])
 		fsp := FSParams{
 			HashAlgo:    hashAlgo,
+			GID:         gid,
 			Salt:        salt,
 			MaxBlobSize: uint32(tx.MaxSize()),
 		}
@@ -136,7 +151,7 @@ func (sys *System) Initialize(ctx context.Context, volh blobcache.Handle) (Volum
 			return err
 		}
 		// setup root
-		tx2 := newTx(root, tx, tx, newMachines(fsp))
+		tx2 := newTx(root, tx, tx, newMachines(fsp), &sys.pki)
 		_, seg := capnp.NewSingleSegmentMessage(nil)
 		node, err := wfscnp.NewRootNode(seg)
 		if err != nil {
@@ -163,10 +178,24 @@ func (sys *System) Initialize(ctx context.Context, volh blobcache.Handle) (Volum
 	if err != nil {
 		return VolumeConfig{}, err
 	}
+	volh2, err := sys.bc.OpenFiat(ctx, volh.OID, blobcache.Action_ALL)
+	if err != nil {
+		return VolumeConfig{}, err
+	}
+	txn, err := bcsdk.BeginTx(ctx, sys.bc, *volh2, blobcache.TxParams{})
+	if err != nil {
+		return VolumeConfig{}, err
+	}
+	defer txn.Abort(ctx)
+	root, err := LoadState(ctx, txn)
+	if err != nil {
+		return VolumeConfig{}, err
+	}
 	return VolumeConfig{
 		NodeID:        ep.Node,
 		VolumeID:      volh.OID,
 		HashAlgo:      hashAlgo,
+		GID:           root.gid,
 		PrivateKeyHex: hex.EncodeToString(privKeyData),
 		DEK:           dek,
 	}, nil
@@ -229,6 +258,7 @@ func (sys *System) Modify(ctx context.Context, vcfg VolumeConfig, fn func(*Tx) e
 // FSParams contains filesystem level parameters.
 type FSParams struct {
 	HashAlgo    blobcache.HashAlgo
+	GID         [32]byte
 	Salt        [32]byte
 	MaxBlobSize uint32
 }
@@ -243,12 +273,18 @@ func (sys *System) NewEmpty(ctx context.Context, txn *bcsdk.Tx, fp FSParams) (FS
 	if err != nil {
 		return FSState{}, err
 	}
+	sessionRoot, err := mach.sessionkv.NewEmpty(ctx, txn)
+	if err != nil {
+		return FSState{}, err
+	}
 	return FSState{
 		version:     0,
 		maxBlobSize: fp.MaxBlobSize,
+		gid:         fp.GID,
 		salt:        fp.Salt,
 		inodes:      inodeRoot,
 		xattrs:      xattrRoot,
+		sessions:    sessionRoot,
 	}, nil
 }
 
@@ -271,8 +307,8 @@ func (sys *System) wrapTx(ctx context.Context, txn *bcsdk.Tx, fqoid blobcache.FQ
 	if err != nil {
 		return nil, err
 	}
-	machs := sys.getMachs(fqoid, FSParams{HashAlgo: hashAlgo, MaxBlobSize: root.maxBlobSize, Salt: root.salt})
-	return newTx(root, txn, txn, machs), nil
+	machs := sys.getMachs(fqoid, FSParams{HashAlgo: hashAlgo, GID: root.gid, MaxBlobSize: root.maxBlobSize, Salt: root.salt})
+	return newTx(root, txn, txn, machs, &sys.pki), nil
 }
 
 type Linker interface {
@@ -287,10 +323,13 @@ type Tx struct {
 	ros  bcsdk.RO
 	rws  bcsdk.RW
 	link Linker
+	gid  [32]byte
+	pki  *inet256.PKI
 
 	fdata      *gdat.Machine
 	inodetx    *gotkv.Tx
 	xattrtx    *gotkv.Tx
+	sessiontx  *gotkv.Tx
 	inodeCache map[INode]wfscnp.Node
 }
 
@@ -298,16 +337,19 @@ type INodeStats struct {
 	RefCount uint32
 }
 
-func newTx(prev FSState, s bcsdk.RW, link Linker, machs *machines) *Tx {
+func newTx(prev FSState, s bcsdk.RW, link Linker, machs *machines, pki *inet256.PKI) *Tx {
 	return &Tx{
 		prev: prev,
 		ros:  s,
 		rws:  s,
 		link: link,
+		gid:  prev.gid,
+		pki:  pki,
 
-		fdata:   &machs.fdata,
-		inodetx: machs.inodekv.NewTx(s, prev.inodes),
-		xattrtx: machs.xattrkv.NewTx(s, prev.xattrs),
+		fdata:     &machs.fdata,
+		inodetx:   machs.inodekv.NewTx(s, prev.inodes),
+		xattrtx:   machs.xattrkv.NewTx(s, prev.xattrs),
+		sessiontx: machs.sessionkv.NewTx(s, prev.sessions),
 	}
 }
 
@@ -321,8 +363,13 @@ func (tx *Tx) Flush(ctx context.Context) (FSState, error) {
 	if err != nil {
 		return FSState{}, err
 	}
+	sessionkvroot, err := tx.sessiontx.Flush(ctx)
+	if err != nil {
+		return FSState{}, err
+	}
 	tx.prev.inodes = inodekvroot
 	tx.prev.xattrs = xattrkvroot
+	tx.prev.sessions = sessionkvroot
 	return tx.prev, nil
 }
 

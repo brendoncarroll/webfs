@@ -672,56 +672,440 @@ func (f VolumeLink_Future) Struct() (VolumeLink, error) {
 	return VolumeLink(p.Struct()), err
 }
 
-const schema_8bfbc7e27592cd31 = "x\xdat\x93Mh\\U\x14\xc7\xff\xff{\xdf\xf4%" +
-	"2a\xe6\xf2Fpa\x16\x96\x0a\xb5\xc4\x98bQ\xe9" +
-	"\xc24\x99\xb4\x9a\x12k\xaf\xd6\x0f\xba\x10\xde\xcc\xbbS" +
-	"\x1e\xf3\xe6\xbd\xe1\xcdLB\xbb\x09\xb8\x8c+\xbbR\xb1" +
-	"\xa0\xa2XC@\x84\x08\xe2N0\x88J\"\".\xb2" +
-	"\x11\x14\\\xeaNA$>\xb9\x93\xc9|\x84\xe9\xeep" +
-	"\xee\xe1\xfc\xee\xfd\x9ds\xe7n\xf3\x82sv\xea\x07\x09" +
-	"\xa1gr'\xb2\xe77~\xf9\xeb\x8f\xed\xd5;Py" +
-	"\x91\x9d\xdd\xbd\xdd\xf9\xed\x9b\x7f\xdf\x00\xe8\xedr\xd3\xfb" +
-	"\x99.\xe0\xfd\xc8\x1b`\xf6\xe6\xbb\xbf^\xde\xab=\xfb" +
-	"\x11t\x9eC\x95\x8e\xad8\xe0\x86\x97\x136\xa2X\x03" +
-	"\xb3'_+\x97\xb7\x1f\xfe{\x13*\xcfA\xe9a\x85" +
-	"/\xbe\xf4\xc2nd\xba\xb5\x1f?\xf3t\xe3\x9f\x8b\xfb" +
-	"_C+\xca\xecO\xef\xbek\xf3\xad\xd6\x1e^\x92." +
-	"%\x85\xf7\x95\xf8\x0e\xf4v\xc4\xa7`v\xea\xee\xdcL" +
-	"-\xf5\xbe\x1fw\x05_\xbe\xe3\x85\xb2\xdbV\xda\xb6\xfd" +
-	"F:O9t\x87n\xc9\x8e\xdc\xf0vm\xf4\xf8\xb7" +
-	"\xf2\x15\x82\xd9\xef\x9b\xb3\xfb\x1f\xb4O\xff4z\xe1n" +
-	"\xe3\\\xeeuo2\xe7\xe2\xb1l\xcdTj\xad\xd9\xaa" +
-	"\xcff\xdc<\x7f\xedf\xd3\x14\xcaI`\xae\x92\xbaH" +
-	"\x01\xa8G\x16\x01R=T\x01(\xd4\xf4I\x80R\xdd" +
-	"\x7f\x1dX\xef\xc4\xf58Y\x8b\xb3\xd4\xdc\xe8D~z" +
-	"\x09n\x18\x197\x08\xd3l5\x89:\x0d\xb3\x12B\xc6" +
-	"\xf5Q\xc0\xa502\x80\xed>!\x1d\xc0\xa1%\x9c\x01" +
-	"\xf4)I='\xa8(J\xb4\xc9G_\x00\xf4\x8c\xa4" +
-	"~J\xb0\xd0\x0ao\x19NBp\x12\xcc*QR\xad" +
-	"\xbf\x18\xde\x02\x0d' 8\x01\x8e2^N\xa2\xce\xbc" +
-	"\xc5\xc7\xf5c\xa0\xf3\xc3 \xf6@'\x01}ZR\x9f" +
-	"\x13\x9c\x8f\x93\xc0,/q\x0a\x82S\xa0\x9b\x84\xc1Q" +
-	"\xdcG\x08\x8b\xb8\x92\x04f\xb6\xe9\xdf\x8c\x12?\x00t" +
-	"^:\x0ff\x99(\xd1\x01\xd4E\xfb\x9c\x0b\x92zE" +
-	"p\x9a\xff\xd9t\x0eP\xcb\x96\xb3$\xa9\xaf\x0aN\x8b" +
-	"\x03\x9b>\x01\xa8\xe7\xae\x03zER\xbf*X\xa8\x85" +
-	"\x91aq\xb0\x94 \x8b\xa0U\xca\xe2`\x9a\x87\xd9\x11" +
-	"\xc9,\x0e\xb6\xb3w<:\xd7\x85\xe5'\xe4\xb9+\xc7" +
-	"t,\x8e\xf3^\x19x_o\x99j\x12\x07\xad\xbe\xfa" +
-	"\xd8\x8f\x13\x9b\x83k\xb3c\xe5[3\x87\x03~\xa0\x0f" +
-	"z\xdb\xce\xf2-I\xfd\xe1\x90\xf7\xf7\xed\xc3\xdf\x93\xd4" +
-	"[\x82\x16nw\xed\x93\xcb\x80\xbe+\xa9\xb7\x05\x95d" +
-	"\x89\x12P\x9fYq[\x92\xfa\x0bA\xe68\xf4\xb7\xd4" +
-	"\xe7\x8b\x10\xcaqJ\xf6C\xab;g\x06\x94\xac\x9a\x1a" +
-	"\xbfm\x82\x05\xb0\xcd\xe2\xe0\x8b\xf5\xdc4\x92 \xac\x85" +
-	"&\x80\\\x18w\x9c\x9aZ9\xe9\xc4m\x00G\x8ft" +
-	"S\xb3z\xa4a\xbd7\xf8B#\x09\xee\xb1\x82Ka" +
-	"j\x1d\xfc\x1f\x00\x00\xff\xff\xe0\x93'\xc5"
+type Session capnp.Struct
+
+// Session_TypeID is the unique identifier for the type Session.
+const Session_TypeID = 0x8261a2e190180149
+
+func NewSession(s *capnp.Segment) (Session, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 3})
+	return Session(st), err
+}
+
+func NewRootSession(s *capnp.Segment) (Session, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 3})
+	return Session(st), err
+}
+
+func ReadRootSession(msg *capnp.Message) (Session, error) {
+	root, err := msg.Root()
+	return Session(root.Struct()), err
+}
+
+func (s Session) String() string {
+	str, _ := text.Marshal(0x8261a2e190180149, capnp.Struct(s))
+	return str
+}
+
+func (s Session) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (Session) DecodeFromPtr(p capnp.Ptr) Session {
+	return Session(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s Session) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s Session) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s Session) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s Session) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s Session) CreateAt() (TAI64N, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return TAI64N(p.Struct()), err
+}
+
+func (s Session) HasCreateAt() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s Session) SetCreateAt(v TAI64N) error {
+	return capnp.Struct(s).SetPtr(0, capnp.Struct(v).ToPtr())
+}
+
+// NewCreateAt sets the createAt field to a newly
+// allocated TAI64N struct, preferring placement in s's segment.
+func (s Session) NewCreateAt() (TAI64N, error) {
+	ss, err := NewTAI64N(capnp.Struct(s).Segment())
+	if err != nil {
+		return TAI64N{}, err
+	}
+	err = capnp.Struct(s).SetPtr(0, capnp.Struct(ss).ToPtr())
+	return ss, err
+}
+
+func (s Session) Ttl() uint32 {
+	return capnp.Struct(s).Uint32(0)
+}
+
+func (s Session) SetTtl(v uint32) {
+	capnp.Struct(s).SetUint32(0, v)
+}
+
+func (s Session) PublicKeyRef() (Ref, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return Ref(p.Struct()), err
+}
+
+func (s Session) HasPublicKeyRef() bool {
+	return capnp.Struct(s).HasPtr(1)
+}
+
+func (s Session) SetPublicKeyRef(v Ref) error {
+	return capnp.Struct(s).SetPtr(1, capnp.Struct(v).ToPtr())
+}
+
+// NewPublicKeyRef sets the publicKeyRef field to a newly
+// allocated Ref struct, preferring placement in s's segment.
+func (s Session) NewPublicKeyRef() (Ref, error) {
+	ss, err := NewRef(capnp.Struct(s).Segment())
+	if err != nil {
+		return Ref{}, err
+	}
+	err = capnp.Struct(s).SetPtr(1, capnp.Struct(ss).ToPtr())
+	return ss, err
+}
+
+func (s Session) TouchedAt() (TAI64N, error) {
+	p, err := capnp.Struct(s).Ptr(2)
+	return TAI64N(p.Struct()), err
+}
+
+func (s Session) HasTouchedAt() bool {
+	return capnp.Struct(s).HasPtr(2)
+}
+
+func (s Session) SetTouchedAt(v TAI64N) error {
+	return capnp.Struct(s).SetPtr(2, capnp.Struct(v).ToPtr())
+}
+
+// NewTouchedAt sets the touchedAt field to a newly
+// allocated TAI64N struct, preferring placement in s's segment.
+func (s Session) NewTouchedAt() (TAI64N, error) {
+	ss, err := NewTAI64N(capnp.Struct(s).Segment())
+	if err != nil {
+		return TAI64N{}, err
+	}
+	err = capnp.Struct(s).SetPtr(2, capnp.Struct(ss).ToPtr())
+	return ss, err
+}
+
+// Session_List is a list of Session.
+type Session_List = capnp.StructList[Session]
+
+// NewSession creates a new list of Session.
+func NewSession_List(s *capnp.Segment, sz int32) (Session_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 8, PointerCount: 3}, sz)
+	return capnp.StructList[Session](l), err
+}
+
+// Session_Future is a wrapper for a Session promised by a client call.
+type Session_Future struct{ *capnp.Future }
+
+func (f Session_Future) Struct() (Session, error) {
+	p, err := f.Future.Ptr()
+	return Session(p.Struct()), err
+}
+func (p Session_Future) CreateAt() TAI64N_Future {
+	return TAI64N_Future{Future: p.Future.Field(0, nil)}
+}
+func (p Session_Future) PublicKeyRef() Ref_Future {
+	return Ref_Future{Future: p.Future.Field(1, nil)}
+}
+func (p Session_Future) TouchedAt() TAI64N_Future {
+	return TAI64N_Future{Future: p.Future.Field(2, nil)}
+}
+
+type Ref capnp.Struct
+
+// Ref_TypeID is the unique identifier for the type Ref.
+const Ref_TypeID = 0xf5abf3a701595ebc
+
+func NewRef(s *capnp.Segment) (Ref, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return Ref(st), err
+}
+
+func NewRootRef(s *capnp.Segment) (Ref, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return Ref(st), err
+}
+
+func ReadRootRef(msg *capnp.Message) (Ref, error) {
+	root, err := msg.Root()
+	return Ref(root.Struct()), err
+}
+
+func (s Ref) String() string {
+	str, _ := text.Marshal(0xf5abf3a701595ebc, capnp.Struct(s))
+	return str
+}
+
+func (s Ref) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (Ref) DecodeFromPtr(p capnp.Ptr) Ref {
+	return Ref(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s Ref) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s Ref) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s Ref) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s Ref) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s Ref) Cid() (UInt256, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return UInt256(p.Struct()), err
+}
+
+func (s Ref) HasCid() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s Ref) SetCid(v UInt256) error {
+	return capnp.Struct(s).SetPtr(0, capnp.Struct(v).ToPtr())
+}
+
+// NewCid sets the cid field to a newly
+// allocated UInt256 struct, preferring placement in s's segment.
+func (s Ref) NewCid() (UInt256, error) {
+	ss, err := NewUInt256(capnp.Struct(s).Segment())
+	if err != nil {
+		return UInt256{}, err
+	}
+	err = capnp.Struct(s).SetPtr(0, capnp.Struct(ss).ToPtr())
+	return ss, err
+}
+
+func (s Ref) Dek() (UInt256, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return UInt256(p.Struct()), err
+}
+
+func (s Ref) HasDek() bool {
+	return capnp.Struct(s).HasPtr(1)
+}
+
+func (s Ref) SetDek(v UInt256) error {
+	return capnp.Struct(s).SetPtr(1, capnp.Struct(v).ToPtr())
+}
+
+// NewDek sets the dek field to a newly
+// allocated UInt256 struct, preferring placement in s's segment.
+func (s Ref) NewDek() (UInt256, error) {
+	ss, err := NewUInt256(capnp.Struct(s).Segment())
+	if err != nil {
+		return UInt256{}, err
+	}
+	err = capnp.Struct(s).SetPtr(1, capnp.Struct(ss).ToPtr())
+	return ss, err
+}
+
+// Ref_List is a list of Ref.
+type Ref_List = capnp.StructList[Ref]
+
+// NewRef creates a new list of Ref.
+func NewRef_List(s *capnp.Segment, sz int32) (Ref_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2}, sz)
+	return capnp.StructList[Ref](l), err
+}
+
+// Ref_Future is a wrapper for a Ref promised by a client call.
+type Ref_Future struct{ *capnp.Future }
+
+func (f Ref_Future) Struct() (Ref, error) {
+	p, err := f.Future.Ptr()
+	return Ref(p.Struct()), err
+}
+func (p Ref_Future) Cid() UInt256_Future {
+	return UInt256_Future{Future: p.Future.Field(0, nil)}
+}
+func (p Ref_Future) Dek() UInt256_Future {
+	return UInt256_Future{Future: p.Future.Field(1, nil)}
+}
+
+type UInt256 capnp.Struct
+
+// UInt256_TypeID is the unique identifier for the type UInt256.
+const UInt256_TypeID = 0xee049aba672f50cf
+
+func NewUInt256(s *capnp.Segment) (UInt256, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 32, PointerCount: 0})
+	return UInt256(st), err
+}
+
+func NewRootUInt256(s *capnp.Segment) (UInt256, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 32, PointerCount: 0})
+	return UInt256(st), err
+}
+
+func ReadRootUInt256(msg *capnp.Message) (UInt256, error) {
+	root, err := msg.Root()
+	return UInt256(root.Struct()), err
+}
+
+func (s UInt256) String() string {
+	str, _ := text.Marshal(0xee049aba672f50cf, capnp.Struct(s))
+	return str
+}
+
+func (s UInt256) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (UInt256) DecodeFromPtr(p capnp.Ptr) UInt256 {
+	return UInt256(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s UInt256) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s UInt256) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s UInt256) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s UInt256) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s UInt256) A() uint64 {
+	return capnp.Struct(s).Uint64(0)
+}
+
+func (s UInt256) SetA(v uint64) {
+	capnp.Struct(s).SetUint64(0, v)
+}
+
+func (s UInt256) B() uint64 {
+	return capnp.Struct(s).Uint64(8)
+}
+
+func (s UInt256) SetB(v uint64) {
+	capnp.Struct(s).SetUint64(8, v)
+}
+
+func (s UInt256) C() uint64 {
+	return capnp.Struct(s).Uint64(16)
+}
+
+func (s UInt256) SetC(v uint64) {
+	capnp.Struct(s).SetUint64(16, v)
+}
+
+func (s UInt256) D() uint64 {
+	return capnp.Struct(s).Uint64(24)
+}
+
+func (s UInt256) SetD(v uint64) {
+	capnp.Struct(s).SetUint64(24, v)
+}
+
+// UInt256_List is a list of UInt256.
+type UInt256_List = capnp.StructList[UInt256]
+
+// NewUInt256 creates a new list of UInt256.
+func NewUInt256_List(s *capnp.Segment, sz int32) (UInt256_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 32, PointerCount: 0}, sz)
+	return capnp.StructList[UInt256](l), err
+}
+
+// UInt256_Future is a wrapper for a UInt256 promised by a client call.
+type UInt256_Future struct{ *capnp.Future }
+
+func (f UInt256_Future) Struct() (UInt256, error) {
+	p, err := f.Future.Ptr()
+	return UInt256(p.Struct()), err
+}
+
+const schema_8bfbc7e27592cd31 = "x\xda\x84\x94_h\x1cU\x14\xc6\xcfw\xef\xecN*" +
+	"\x09\xbb\x93Y\xa1\x0f\xe6\xc1\xd0BS\xba1\xd1\xa6\xd6" +
+	"\x82\xa6\xf9\xd3\xea\xd6\xb4\xe6\xa6\x8d\xda \xc5\xdd\x9d\xbb" +
+	"\xc9\xb8\xb33\xeb\xeelb\xfa\x12\xc9c|Q\x9f\xb4" +
+	"X\xd0\xa0\xb4\xc6\x82\x08\x11\xa4\xf8(H\x95T\x8a\x0f" +
+	"\xd2\x17\xa1\x82\xf8d_\xa4\x82\x88\x8e\xdc\xd9\xcd\xce\xee" +
+	"v\x8bo\x873g\xcew\xce\xef\xdcsF\x16\xd8q" +
+	"m\xb4\xef'\x8d\x988\x1a\x8b\x07\x19\xec}\xfb\xcef" +
+	"v\x9dD/\x10\x8c\xee\xbc[\xfb\xe5\xdb\xbf\xdf\xa2\x18" +
+	"\xd7\x89L\xc16\xcd\xf3LY\xf3\xec7B\xf0\xc2\xc6" +
+	"\xcf\xf7~\xdf^\xbeLF/\x8bb\x09\xe6\x18\xdf2" +
+	"\x9f\x0e\x7fy\x8a/\x12\x82w>\xb8s\xeaf\xe1\xb9" +
+	"OT\xd6\x96HMEH\xbea\x96\xc2X\x9b\xaf\x10" +
+	"\x82'/LMm\xef\xffs\x8b\x8c\xde\xd6\x02B\xd9" +
+	"\x1b\xfc\xbay+\x8c\xdd\x09c\xaf<\xfbL\xe9\xaf\x13" +
+	"\xb7\xbf!a\x80\x07w\xcd\x87\xce\x8dW\xab7i\x9e" +
+	"\xeb\xe0`\xe6\x90\xf6\x1d\xc1Lk\x9f\x13\x82}WG" +
+	"\x0e\x15*\xe6\xf7\xddJ\xb8\xa1]2o\x85\xd6\x8e\xa6" +
+	"\xd26\x13\x89^\xf0N\x08\xe9\xd8\x869\x16\xd3\x89\x9e" +
+	"\x18\x8d\xbd\x04B\xf0\xeb\xd6\xf0\xedM\xff\xc0\x8f\xed\x05" +
+	"\x87\xe9J\xf1u\xf3\xf5\xb8N<\xf8a\xf6\xb1\xc5\xeb" +
+	"\x97\xb4\xbb*\xa5\xd6\x11u:\xbei\xce\xc7C\xc0q" +
+	"\x85\xf5\xeb\x0b\xe7q\xe5\x8f\xcf\xeeu#\xb0__7" +
+	"\x87\xf4\xba\xb5B\xe9`E\xe6\x0a\xd5\xe1|\x16e\xb7" +
+	"|\xec\xac\xacVu\xdbsg\x01\x91\xe4\x1a\x91\x06\"" +
+	"#{\x8aH\xbc\xca!\x1c\x06 \x05\xe5\xb3\x07\x89\x84" +
+	"\xc5!\xca\x0c\x06C\x0a\x8c\xc8(\xbdF$\x1c\x0e\xf1" +
+	"\x06\x83\xc1Y\x0a\x9c\xc8\xa8\xcd\x11\x09\x9fC\xbc\xc9\x10" +
+	"\xe4+2\xeb\xcb\x09\x9f\x88\x90\x8c\x90\x12\x90$\xe8\xbe" +
+	"\xef\xa0\x87\x18z\x08A\xb9\x96s\xec\xfc\xf3\x92\x12\xab" +
+	"s\xb2\x80d\xd4T=8\xf0\xbdZ~IZ\x13\x04" +
+	"\xff\xfeT\xedm\x9d[-\xcb\xc4\x94g\xc9\xb0\xaf\xb0" +
+	"\xd4\xa1I\x15i<\x9a#\x023\x06\x06\x89\xc0\x8d\x87" +
+	"\x17\x88\xd6jn\xd1\xf5V\xdc\xa0\"\x17kN\xb6r" +
+	"\x92t\xdb\x91\xbaeW\x82e\xcf\xa9\x95\xe4\x8cM\xdc" +
+	"-\xb6\x0b\x9c\xb4\x1dI\xa4\xb2\xf74\xa9\x0d\x1d$\x12" +
+	"\xfb8\xc4\x08\x83\x01V\xc7\x96V0\x0eq\x88\xa3\x0c" +
+	"\x89\xaa}Qb\x0f1\xec!\x049\xc7\xcb\x17\xcf\xda" +
+	"\x17\x09\xb2\xc9\xa0M\xe3E\xcf\xa9\x8d+y\xb7\xd8!" +
+	"t\xacU\xa81\x9f\xb4\x9a\xcf\x01\x0eq\x98a\xdc\xf5" +
+	",\x99\x99F\x1f1\xf4\x11t\xcf\xb6v\xed\xa6\x04S" +
+	"\x12g<K\x0e\x97\xb3\xab\x8e\x97\xb5\x88D/\xd7\x1e" +
+	"\x09\x02\x96\x82Fd\x9cP\xed\x1c\xe7\x103\x0c\x03\xf8" +
+	"W\xb9cDFF\xe9Ls\x88Y\x86\x01\xf6\x8fr" +
+	"\xc7\x89\x8c\xd3\x0bDb\x86C\xbc\xcc\x90(\xd8\x8eD" +
+	"2\xda\xe1\xc6\xb4-\xbb\x82d\xf4\xf8\x1b\x83k\x85\x8c" +
+	"d\xb4\xcc]\xe7:\x919\xc2\x0f\x9f\xe9\xc01\xd9\x8d" +
+	"{.\xe2\xbeV\x95y\xcf\xb5\xaaM\xf4n\xd6\xf5\x94" +
+	"\x8ft\xe5\xed\x0a_\x91\xa9\x0fxoS\xe8}5\xcb" +
+	"\xf78\xc4\xc7-\xdc?R\x8d\x7f\xc8!\xae1(q" +
+	"\xf5\xd6>U\xfbs\x95Cl\xab\xb5@}-\xbeP" +
+	"\xe0\xaeq\x88\xaf\x18\x10C\xcb)2\xbe\x9c$fh" +
+	"Z\x0a:\x91q\xf9`\xa4\xd2X\x9f\x07\xbd\xf9\x92g" +
+	"\xd9\x05[Z\xc4'\xba}\xae\xc8\xc2\x94Ws\xc3\xdd" +
+	"k4\xa9W\xe4\xf2.\x86\xb5\xc6\xe0\x13%\xcfz\xc0" +
+	"\x13\x9c\xb6+\x8aA\xbbs>\xe3\xfa\xfa\xe3cG:" +
+	"nF?\x91x\x85C,\xb5\xc0\x91\xfd\xd1!1X" +
+	"\x83\x8e\xdd\xdfrI8\xaf\xd3))\xe7\x12\x87\xf0\x19" +
+	"\x90\xdd-\x11\xb9\xa6\x95oZVs\x8eme\xcd\xc9" +
+	"B\xe7B\x0e\xfe\xcf\x9e\xe8y\xdbB2\xba\xb4\xbb\xef" +
+	"T\x16\xef\xf7\xfe\x17\x00\x00\xff\xff\x18]\xab\x1c"
 
 func RegisterSchema(reg *schemas.Registry) {
 	reg.Register(&schemas.Schema{
 		String: schema_8bfbc7e27592cd31,
 		Nodes: []uint64{
+			0x8261a2e190180149,
 			0x9d76b4edf5de8a4f,
 			0xa54866ce4ae19c91,
 			0xaaf625b443435e37,
@@ -729,6 +1113,8 @@ func RegisterSchema(reg *schemas.Registry) {
 			0xcb1372662c30a824,
 			0xce73733f540a13ee,
 			0xd32874a2d92eaae5,
+			0xee049aba672f50cf,
+			0xf5abf3a701595ebc,
 		},
 		Compressed: true,
 	})

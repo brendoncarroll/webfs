@@ -35,18 +35,22 @@ func (ino INode) String() string {
 type FSState struct {
 	version     uint16
 	maxBlobSize uint32
+	gid         [32]byte
 	salt        [32]byte
 	inodes      gotkv.Root
 	xattrs      gotkv.Root
+	sessions    gotkv.Root
 }
 
 func (r FSState) Marshal(out []byte) []byte {
 	out = sbe.AppendUint16(out, r.version)
 	out = sbe.AppendUint32(out, r.maxBlobSize)
+	out = append(out, r.gid[:]...)
 	out = append(out, r.salt[:]...)
 
 	out = appendRoot(out, r.inodes)
 	out = appendRoot(out, r.xattrs)
+	out = appendRoot(out, r.sessions)
 	return out
 }
 
@@ -61,6 +65,11 @@ func (r *FSState) Unmarshal(data []byte) error {
 		return err
 	}
 	r.maxBlobSize = maxSize
+	gidData, data, err := sbe.ReadN(data, 32)
+	if err != nil {
+		return err
+	}
+	r.gid = [32]byte(gidData)
 	saltData, data, err := sbe.ReadN(data, 32)
 	if err != nil {
 		return err
@@ -77,6 +86,11 @@ func (r *FSState) Unmarshal(data []byte) error {
 		return err
 	}
 	r.xattrs = xattrs
+	sessions, data, err := readRoot(data)
+	if err != nil {
+		return err
+	}
+	r.sessions = sessions
 	if len(data) != 0 {
 		return fmt.Errorf("unexpected trailing state data: %d bytes", len(data))
 	}

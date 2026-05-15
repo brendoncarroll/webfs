@@ -3,7 +3,7 @@ module github.com/brendoncarroll/webfs
 go 1.26.0
 
 require (
-	blobcache.io/blobcache v0.7.1-0.20260514001019-8ac94d86430a
+	blobcache.io/blobcache v0.7.1-0.20260515040525-c568b849bf89
 	capnproto.org/go/capnp/v3 v3.1.0-alpha.2
 	github.com/cloudflare/circl v1.6.1
 	github.com/gotvc/got v0.4.1-0.20260514135151-658fded0a865
@@ -13,6 +13,7 @@ require (
 	go.brendoncarroll.net/star v0.0.0-20260504181633-9736e9cb9450
 	go.brendoncarroll.net/tai64 v0.0.0-20241118171318-6e12d283d5e4
 	go.inet256.org/inet256 v0.0.8
+	golang.org/x/sync v0.19.0
 	golang.org/x/sys v0.42.0
 )
 
@@ -69,7 +70,6 @@ require (
 	golang.org/x/crypto v0.46.1-0.20251210140736-7dacc380ba00 // indirect
 	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b // indirect
 	golang.org/x/net v0.47.0 // indirect
-	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/text v0.32.0 // indirect
 	google.golang.org/protobuf v1.35.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect

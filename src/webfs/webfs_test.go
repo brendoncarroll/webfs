@@ -2,7 +2,6 @@ package webfs
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -11,6 +10,7 @@ import (
 
 	"blobcache.io/blobcache/src/bclocal"
 	"blobcache.io/blobcache/src/blobcache"
+	"blobcache.io/blobcache/src/blobcache/blobcachetests"
 	"github.com/brendoncarroll/webfs/src/internal/wfscnp"
 	"github.com/stretchr/testify/require"
 	"go.brendoncarroll.net/tai64"
@@ -158,7 +158,7 @@ func TestXAttrSizeLimits(t *testing.T) {
 func TestSessions(t *testing.T) {
 	ctx := context.Background()
 	sys, vcfg := setupVol(t)
-	require.NotEqual(t, [32]byte{}, vcfg.GID)
+	require.NotEqual(t, GID{}, vcfg.GID)
 	pubKey, privKey, err := sys.pki.GenerateKey()
 	require.NoError(t, err)
 	wantID := sys.pki.NewID(pubKey)
@@ -240,11 +240,7 @@ func TestGCSessions(t *testing.T) {
 func TestLocks(t *testing.T) {
 	ctx := context.Background()
 	sys, vcfg := setupVol(t)
-	privKeyData, err := hex.DecodeString(vcfg.PrivateKeyHex)
-	require.NoError(t, err)
-	privKey1, err := sys.pki.ParsePrivateKey(privKeyData)
-	require.NoError(t, err)
-	pubKey1 := inet256.PublicFromPrivate(privKey1)
+	pubKey1, privKey1 := vcfg.DeriveSiging()
 	id1 := sys.pki.NewID(pubKey1)
 	const owner1 uint64 = 1
 	var fileIno INode
@@ -391,11 +387,8 @@ func TestLocksConflict(t *testing.T) {
 func TestFindConflictingLockOwners(t *testing.T) {
 	ctx := context.Background()
 	sys, vcfg := setupVol(t)
-	privKeyData, err := hex.DecodeString(vcfg.PrivateKeyHex)
-	require.NoError(t, err)
-	privKey, err := sys.pki.ParsePrivateKey(privKeyData)
-	require.NoError(t, err)
-	id := sys.pki.NewID(inet256.PublicFromPrivate(privKey))
+	pub, priv := vcfg.DeriveSiging()
+	id := sys.pki.NewID(pub)
 	const owner1 uint64 = 1
 	const owner2 uint64 = 2
 
@@ -405,7 +398,7 @@ func TestFindConflictingLockOwners(t *testing.T) {
 			BlockSize: 4096,
 		})
 		require.NoError(t, err)
-		_, err = tx.ensureSession(ctx, privKey, tai64.Now())
+		_, err = tx.ensureSession(ctx, priv, tai64.Now())
 		require.NoError(t, err)
 		require.NoError(t, tx.addLock(ctx, id, owner1, ino, LockKindWrite, 0, 100))
 
@@ -489,8 +482,11 @@ func setupVol(t testing.TB) (*System, VolumeConfig) {
 		},
 	})
 	require.NoError(t, err)
-	sys := NewSystem(bc)
-	vcfg, err := sys.Initialize(ctx, *volh)
-	require.NoError(t, err)
+	sys := NewSystem(bc, DefaultPKI())
+	vcfg := sys.GenerateConfig(blobcache.FQOID{
+		Node: blobcachetests.Endpoint(t, bc).Node,
+		OID:  volh.OID,
+	})
+	require.NoError(t, sys.Initialize(ctx, *volh, vcfg))
 	return sys, vcfg
 }

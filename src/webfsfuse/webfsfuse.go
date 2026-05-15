@@ -2,7 +2,6 @@ package webfsfuse
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
 	"io"
 	iofs "io/fs"
@@ -629,15 +628,8 @@ func newFileHandle(n *Node, appendMode bool) *fileHandle {
 }
 
 func (fsys *FS) lockSessionID() (inet256.ID, error) {
-	data, err := hex.DecodeString(fsys.rootCfg.PrivateKeyHex)
-	if err != nil {
-		return inet256.ID{}, err
-	}
-	privKey, err := fsys.pki.ParsePrivateKey(data)
-	if err != nil {
-		return inet256.ID{}, err
-	}
-	return fsys.pki.NewID(inet256.PublicFromPrivate(privKey)), nil
+	pub, _ := fsys.rootCfg.DeriveSiging()
+	return fsys.pki.NewID(pub), nil
 }
 
 func (n *Node) Unlink(ctx context.Context, name string) syscall.Errno {

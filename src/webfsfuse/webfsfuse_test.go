@@ -8,9 +8,8 @@ import (
 
 	"blobcache.io/blobcache/src/bclocal"
 	"blobcache.io/blobcache/src/blobcache"
+	"blobcache.io/blobcache/src/blobcache/blobcachetests"
 	"github.com/brendoncarroll/webfs/src/webfs"
-	"github.com/cloudflare/circl/sign"
-	"github.com/cloudflare/circl/sign/mldsa/mldsa87"
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/hanwen/go-fuse/v2/posixtest"
@@ -87,8 +86,10 @@ func mountTestFS(t *testing.T) (string, func()) {
 func setupVolume(t testing.TB) (*webfs.System, inet256.PKI, webfs.VolumeConfig) {
 	t.Helper()
 	ctx := context.Background()
-	pki := inet256.PKI{Default: "mldsa87", Schemes: map[string]sign.Scheme{"mldsa87": mldsa87.Scheme()}}
+	pki := webfs.DefaultPKI()
 	bsvc := bclocal.NewTestService(t)
+	sys := webfs.NewSystem(bsvc, pki)
+
 	volh, err := bsvc.CreateVolume(ctx, nil, blobcache.VolumeSpec{
 		Local: &blobcache.VolumeBackend_Local{
 			HashAlgo: blobcache.HashAlgo_BLAKE2b_256,
@@ -96,8 +97,7 @@ func setupVolume(t testing.TB) (*webfs.System, inet256.PKI, webfs.VolumeConfig) 
 		},
 	})
 	require.NoError(t, err)
-	sys := webfs.NewSystemWithPKI(bsvc, pki)
-	vcfg, err := sys.Initialize(ctx, *volh)
-	require.NoError(t, err)
+	vcfg := sys.GenerateConfig(blobcache.FQOID{Node: blobcachetests.Endpoint(t, bsvc).Node, OID: volh.OID})
+	require.NoError(t, sys.Initialize(ctx, *volh, vcfg))
 	return sys, pki, vcfg
 }

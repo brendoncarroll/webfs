@@ -35,7 +35,7 @@ func (ino INode) String() string {
 type FSState struct {
 	version     uint16
 	maxBlobSize uint32
-	gid         [32]byte
+	gid         GID
 	salt        [32]byte
 	inodes      gotkv.Root
 	xattrs      gotkv.Root

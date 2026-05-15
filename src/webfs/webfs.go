@@ -3,9 +3,9 @@ package webfs
 import (
 	"context"
 	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"io/fs"
+	"maps"
 	"sync"
 
 	"blobcache.io/blobcache/src/bcsdk"
@@ -20,17 +20,36 @@ import (
 	"go.inet256.org/inet256/src/inet256"
 )
 
+type GID = blobcache.CID
+
+const MLDSA87 = "mldsa87"
+
 type VolumeConfig struct {
-	NodeID        blobcache.NodeID   `json:"node"`
-	VolumeID      blobcache.OID      `json:"volume"`
-	HashAlgo      blobcache.HashAlgo `json:"hash_algo"`
-	GID           [32]byte           `json:"gid"`
-	DEK           blobcache.DEK      `json:"dek"`
-	PrivateKeyHex string             `json:"private_key"`
+	NodeID         blobcache.NodeID   `json:"node"`
+	VolumeID       blobcache.OID      `json:"volume"`
+	HashAlgo       blobcache.HashAlgo `json:"hash_algo"`
+	GID            GID                `json:"gid"`
+	DEK            blobcache.DEK      `json:"dek"`
+	PrivateKeySeed blobcache.DEK      `json:"private"`
+	// SignAlgo is the signature algorithm to act as.
+	SignAlgo string `json:"sign_algo"`
+}
+
+func (vc VolumeConfig) DeriveSiging() (sign.PublicKey, sign.PrivateKey) {
+	return mldsa87.NewKeyFromSeed((*[32]byte)(&vc.PrivateKeySeed))
 }
 
 func (vc VolumeConfig) FQOID() blobcache.FQOID {
 	return blobcache.FQOID{Node: vc.NodeID, OID: vc.VolumeID}
+}
+
+func DefaultPKI() inet256.PKI {
+	return inet256.PKI{
+		Default: MLDSA87,
+		Schemes: map[string]sign.Scheme{
+			MLDSA87: mldsa87.Scheme(),
+		},
+	}
 }
 
 type machines struct {
@@ -106,40 +125,54 @@ type System struct {
 	machs map[blobcache.FQOID]*machines
 }
 
-func NewSystem(svc blobcache.Service) *System {
-	return NewSystemWithPKI(svc, inet256.PKI{
-		Default: "mldsa87",
-		Schemes: map[string]sign.Scheme{
-			"mldsa87": mldsa87.Scheme(),
-		},
-	})
-}
-
-func NewSystemWithPKI(svc blobcache.Service, pki inet256.PKI) *System {
+func NewSystem(svc blobcache.Service, pki inet256.PKI) *System {
 	return &System{pki: pki, bc: svc}
 }
 
-func (sys *System) Initialize(ctx context.Context, volh blobcache.Handle) (VolumeConfig, error) {
-	var secret [32]byte
-	// signing
-	rand.Read(secret[:])
-	_, privKey := mldsa87.NewKeyFromSeed(&secret)
-	privKeyData, err := sys.pki.MarshalPrivateKey(nil, privKey)
-	if err != nil {
-		return VolumeConfig{}, err
+func (sys *System) PKI() inet256.PKI {
+	return inet256.PKI{
+		Default: sys.pki.Default,
+		Schemes: maps.Clone(sys.pki.Schemes),
 	}
+}
+
+func (sys *System) GenerateConfig(fqoid blobcache.FQOID) VolumeConfig {
+	var asymSeed [32]byte
+	rand.Read(asymSeed[:])
+	// signing
+	mldsa87.NewKeyFromSeed(&asymSeed)
 
 	// aead
-	rand.Read(secret[:])
-	dek := secret
+	var aeadSecret [32]byte
+	rand.Read(aeadSecret[:])
+	// gid
+	var gid [32]byte
+	rand.Read(gid[:])
 
-	hashAlgo := blobcache.HashAlgo_BLAKE3_256
+	const hashAlgo = blobcache.HashAlgo_BLAKE3_256
+	return VolumeConfig{
+		VolumeID:       fqoid.OID,
+		NodeID:         fqoid.Node,
+		HashAlgo:       hashAlgo,
+		GID:            gid,
+		DEK:            aeadSecret,
+		PrivateKeySeed: asymSeed,
+		SignAlgo:       MLDSA87,
+	}
+}
+
+// Initialize initializes a new webfs filesystem in a volume using config.
+// The volume must have an empty cell.
+func (sys *System) Initialize(ctx context.Context, volh blobcache.Handle, cfg VolumeConfig) error {
+	var salt [32]byte
+	rand.Read(salt[:])
 	// setup volume
 	if err := func() error {
 		tx, err := bcsdk.BeginTx(ctx, sys.bc, volh, blobcache.TxParams{Modify: true})
 		if err != nil {
 			return err
 		}
+		defer tx.Abort(ctx)
 		var data []byte
 		if err := tx.Load(ctx, &data); err != nil {
 			return err
@@ -147,13 +180,9 @@ func (sys *System) Initialize(ctx context.Context, volh blobcache.Handle) (Volum
 		if len(data) != 0 {
 			return fmt.Errorf("volume cell must be empty to be initialized")
 		}
-		var salt [32]byte
-		rand.Read(salt[:])
-		var gid [32]byte
-		rand.Read(gid[:])
 		fsp := FSParams{
-			HashAlgo:    hashAlgo,
-			GID:         gid,
+			HashAlgo:    cfg.HashAlgo,
+			GID:         cfg.GID,
 			Salt:        salt,
 			MaxBlobSize: uint32(tx.MaxSize()),
 		}
@@ -182,34 +211,9 @@ func (sys *System) Initialize(ctx context.Context, volh blobcache.Handle) (Volum
 		}
 		return tx.Commit(ctx)
 	}(); err != nil {
-		return VolumeConfig{}, err
+		return err
 	}
-
-	ep, err := sys.bc.Endpoint(ctx)
-	if err != nil {
-		return VolumeConfig{}, err
-	}
-	volh2, err := sys.bc.OpenFiat(ctx, volh.OID, blobcache.Action_ALL)
-	if err != nil {
-		return VolumeConfig{}, err
-	}
-	txn, err := bcsdk.BeginTx(ctx, sys.bc, *volh2, blobcache.TxParams{})
-	if err != nil {
-		return VolumeConfig{}, err
-	}
-	defer txn.Abort(ctx)
-	root, err := LoadState(ctx, txn)
-	if err != nil {
-		return VolumeConfig{}, err
-	}
-	return VolumeConfig{
-		NodeID:        ep.Node,
-		VolumeID:      volh.OID,
-		HashAlgo:      hashAlgo,
-		GID:           root.gid,
-		PrivateKeyHex: hex.EncodeToString(privKeyData),
-		DEK:           dek,
-	}, nil
+	return nil
 }
 
 func (sys *System) View(ctx context.Context, vcfg VolumeConfig, fn func(*Tx) error) error {
@@ -227,10 +231,7 @@ func (sys *System) View(ctx context.Context, vcfg VolumeConfig, fn func(*Tx) err
 		return err
 	}
 	fqoid := blobcache.FQOID{OID: volh.OID, Node: ep.Node}
-	privKey, err := parseVolumePrivateKey(&sys.pki, vcfg)
-	if err != nil {
-		return err
-	}
+	privKey := deriveVolumePrivateKey(&sys.pki, vcfg)
 	txn2, err := sys.wrapTx(ctx, txn, fqoid, vcfg.HashAlgo, privKey)
 	if err != nil {
 		return err
@@ -253,10 +254,7 @@ func (sys *System) Modify(ctx context.Context, vcfg VolumeConfig, fn func(*Tx) e
 		return err
 	}
 	fqoid := blobcache.FQOID{OID: volh.OID, Node: ep.Node}
-	privKey, err := parseVolumePrivateKey(&sys.pki, vcfg)
-	if err != nil {
-		return err
-	}
+	privKey := deriveVolumePrivateKey(&sys.pki, vcfg)
 	txn2, err := sys.wrapTx(ctx, txn, fqoid, vcfg.HashAlgo, privKey)
 	if err != nil {
 		return err
@@ -277,7 +275,7 @@ func (sys *System) Modify(ctx context.Context, vcfg VolumeConfig, fn func(*Tx) e
 // FSParams contains filesystem level parameters.
 type FSParams struct {
 	HashAlgo    blobcache.HashAlgo
-	GID         [32]byte
+	GID         GID
 	Salt        [32]byte
 	MaxBlobSize uint32
 }
@@ -347,7 +345,7 @@ type Tx struct {
 	ros  bcsdk.RO
 	rws  bcsdk.RW
 	link Linker
-	gid  [32]byte
+	gid  GID
 	pki  *inet256.PKI
 	priv inet256.PrivateKey
 
@@ -381,12 +379,9 @@ func newTx(prev FSState, s bcsdk.RW, link Linker, machs *machines, pki *inet256.
 	}
 }
 
-func parseVolumePrivateKey(pki *inet256.PKI, vcfg VolumeConfig) (inet256.PrivateKey, error) {
-	data, err := hex.DecodeString(vcfg.PrivateKeyHex)
-	if err != nil {
-		return nil, err
-	}
-	return pki.ParsePrivateKey(data)
+func deriveVolumePrivateKey(pki *inet256.PKI, vcfg VolumeConfig) inet256.PrivateKey {
+	_, priv := mldsa87.NewKeyFromSeed((*[32]byte)(&vcfg.PrivateKeySeed))
+	return priv
 }
 
 // Flush writes out the changes to the store and returns a new root.

@@ -161,11 +161,11 @@ func (tx *FSTx) Rename(ctx context.Context, oldParent INode, oldName string, new
 	}
 
 	if dstExists {
-		srcMode, err := tx.getModeLocked(ctx, src.Target)
+		srcMode, err := tx.getMode(ctx, src.Target)
 		if err != nil {
 			return err
 		}
-		dstMode, err := tx.getModeLocked(ctx, dst.Target)
+		dstMode, err := tx.getMode(ctx, dst.Target)
 		if err != nil {
 			return err
 		}
@@ -174,21 +174,6 @@ func (tx *FSTx) Rename(ctx context.Context, oldParent INode, oldName string, new
 		}
 		if !srcMode.IsDir() && dstMode.IsDir() {
 			return fs.ErrInvalid
-		}
-		if dstMode.IsDir() {
-			// dst is a directory, check if it is notEmpty.
-			// flushing requires the write lock
-			if _, err := tx.inodetx.Flush(ctx); err != nil {
-				return err
-			}
-			it := tx.inodetx.Iterate(ctx, gotkv.PrefixSpan(dst.Target[:]))
-			_, err := streams.Next(ctx, it)
-			if err != nil && !streams.IsEOS(err) {
-				return err
-			} else if err == nil {
-				// dst is non-empty
-				return fs.ErrExist
-			}
 		}
 	}
 
@@ -251,26 +236,16 @@ func (tx *FSTx) decRef(ctx context.Context, ino INode) error {
 
 func (tx *FSTx) ReadDir(ctx context.Context, ino INode, gteq string) iter.Seq2[DirEnt, error] {
 	return func(yield func(DirEnt, error) bool) {
-		tx.mu.Lock()
-		defer tx.mu.Unlock()
-		for ent, err := range tx.readDirLocked(ctx, ino, gteq) {
-			if !yield(ent, err) {
-				return
-			}
-		}
-	}
-}
-
-func (tx *FSTx) readDirLocked(ctx context.Context, ino INode, gteq string) iter.Seq2[DirEnt, error] {
-	return func(yield func(DirEnt, error) bool) {
+		tx.mu.RLock()
+		defer tx.mu.RUnlock()
 		if _, err := tx.getDir(ctx, ino); err != nil {
 			yield(DirEnt{}, err)
 			return
 		}
-		if _, err := tx.inodetx.Flush(ctx); err != nil {
-			yield(DirEnt{}, err)
-			return
+		if tx.inodetx.Queued() > 0 {
+			yield(DirEnt{}, fmt.Errorf("cannot readdir, inode table has pending writes"))
 		}
+
 		begin := makeDirEntKey(nil, ino, gteq)
 		end := gotkv.PrefixEnd(ino[:])
 		it := tx.inodetx.IterateFlushed(ctx, gotkv.Span{Begin: begin, End: end})

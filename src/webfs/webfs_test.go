@@ -22,7 +22,7 @@ func TestFile(t *testing.T) {
 	sys, vcfg := setupVol(t)
 	var fileIno INode
 	contents := "hello world"
-	require.NoError(t, sys.Modify(ctx, vcfg, func(tx *Tx) error {
+	require.NoError(t, modify(t, sys, ctx, vcfg, func(tx *Tx) error {
 		ino, err := tx.CreateFileAt(ctx, INode{}, "a", 0o755, FileParams{
 			Now:       tai64.Now(),
 			BlockSize: 4096,
@@ -34,7 +34,7 @@ func TestFile(t *testing.T) {
 		fileIno = ino
 		return nil
 	}))
-	require.NoError(t, sys.View(ctx, vcfg, func(tx *Tx) error {
+	require.NoError(t, view(t, sys, ctx, vcfg, func(tx *Tx) error {
 		buf := make([]byte, 100)
 		n, err := tx.ReadAt(ctx, fileIno, 0, buf)
 		actual := string(buf[:n])
@@ -49,7 +49,7 @@ func TestDir(t *testing.T) {
 	contents := []byte("hello world")
 	var fileIno INode
 
-	require.NoError(t, sys.Modify(ctx, vcfg, func(tx *Tx) error {
+	require.NoError(t, modify(t, sys, ctx, vcfg, func(tx *Tx) error {
 		ino, err := tx.CreateFileAt(ctx, rootINode(), "a", 0o644, FileParams{
 			Now:       tai64.Now(),
 			BlockSize: 4096,
@@ -108,7 +108,7 @@ func TestXAttrs(t *testing.T) {
 	sys, vcfg := setupVol(t)
 	var fileIno INode
 
-	require.NoError(t, sys.Modify(ctx, vcfg, func(tx *Tx) error {
+	require.NoError(t, modify(t, sys, ctx, vcfg, func(tx *Tx) error {
 		ino, err := tx.CreateFileAt(ctx, rootINode(), "a", 0o644, FileParams{
 			Now:       tai64.Now(),
 			BlockSize: 4096,
@@ -121,14 +121,14 @@ func TestXAttrs(t *testing.T) {
 		return nil
 	}))
 
-	require.NoError(t, sys.View(ctx, vcfg, func(tx *Tx) error {
+	require.NoError(t, view(t, sys, ctx, vcfg, func(tx *Tx) error {
 		value, err := tx.GetXAttr(ctx, fileIno, "user.key")
 		require.NoError(t, err)
 		require.Equal(t, []byte("new"), value)
 		return nil
 	}))
 
-	require.NoError(t, sys.Modify(ctx, vcfg, func(tx *Tx) error {
+	require.NoError(t, modify(t, sys, ctx, vcfg, func(tx *Tx) error {
 		require.NoError(t, tx.RemoveXAttr(ctx, fileIno, "user.key"))
 		_, err := tx.GetXAttr(ctx, fileIno, "user.key")
 		require.ErrorIs(t, err, fs.ErrNotExist)
@@ -140,7 +140,7 @@ func TestXAttrSizeLimits(t *testing.T) {
 	ctx := context.Background()
 	sys, vcfg := setupVol(t)
 
-	require.NoError(t, sys.Modify(ctx, vcfg, func(tx *Tx) error {
+	require.NoError(t, modify(t, sys, ctx, vcfg, func(tx *Tx) error {
 		ino, err := tx.CreateFileAt(ctx, rootINode(), "a", 0o644, FileParams{
 			Now:       tai64.Now(),
 			BlockSize: 4096,
@@ -165,7 +165,7 @@ func TestSessions(t *testing.T) {
 	createdAt := tai64.TAI64N{Seconds: 1, Nanoseconds: 2}
 	touchedAt := tai64.TAI64N{Seconds: 3, Nanoseconds: 4}
 
-	require.NoError(t, sys.Modify(ctx, vcfg, func(tx *Tx) error {
+	require.NoError(t, modify(t, sys, ctx, vcfg, func(tx *Tx) error {
 		id, err := tx.ensureSession(ctx, privKey, createdAt)
 		require.NoError(t, err)
 		require.Equal(t, wantID, id)
@@ -175,7 +175,6 @@ func TestSessions(t *testing.T) {
 		session := requireSessionValue(t, ctx, sys, tx, pubKey, wantID)
 		require.Equal(t, createdAt, readCNPTime(t, session.CreateAt))
 		require.Equal(t, createdAt, readCNPTime(t, session.TouchedAt))
-		require.True(t, session.HasPublicKeyRef())
 
 		id, err = tx.ensureSession(ctx, privKey, touchedAt)
 		require.NoError(t, err)
@@ -187,7 +186,7 @@ func TestSessions(t *testing.T) {
 		return nil
 	}))
 
-	require.NoError(t, sys.Modify(ctx, vcfg, func(tx *Tx) error {
+	require.NoError(t, modify(t, sys, ctx, vcfg, func(tx *Tx) error {
 		tx.gid[0] ^= 0xff
 		_, err := tx.ensureSession(ctx, privKey, tai64.Now())
 		require.Error(t, err)
@@ -195,16 +194,15 @@ func TestSessions(t *testing.T) {
 		return nil
 	}))
 
-	require.NoError(t, sys.View(ctx, vcfg, func(tx *Tx) error {
+	require.NoError(t, view(t, sys, ctx, vcfg, func(tx *Tx) error {
 		require.Equal(t, vcfg.GID, tx.gid)
 		requireSessionValue(t, ctx, sys, tx, pubKey, wantID)
 		return nil
 	}))
 
-	require.NoError(t, sys.Modify(ctx, vcfg, func(tx *Tx) error {
+	require.NoError(t, modify(t, sys, ctx, vcfg, func(tx *Tx) error {
 		require.NoError(t, tx.dropSession(ctx, wantID))
-		var value []byte
-		exists, err := tx.sessiontx.Get(ctx, wantID[:], &value)
+		exists, err := tx.SessionExists(ctx, wantID)
 		require.NoError(t, err)
 		require.False(t, exists)
 		return nil
@@ -224,7 +222,7 @@ func TestGCSessions(t *testing.T) {
 	require.NoError(t, err)
 	immortalID := sys.pki.NewID(inet256.PublicFromPrivate(immortalPriv))
 
-	require.NoError(t, sys.Modify(ctx, vcfg, func(tx *Tx) error {
+	require.NoError(t, modify(t, sys, ctx, vcfg, func(tx *Tx) error {
 		require.NoError(t, putTestSession(ctx, tx, expiredPriv, tai64.TAI64N{Seconds: 1}, 1))
 		require.NoError(t, putTestSession(ctx, tx, activePriv, tai64.Now(), 3600))
 		require.NoError(t, putTestSession(ctx, tx, immortalPriv, tai64.TAI64N{Seconds: 1}, 0))
@@ -245,7 +243,7 @@ func TestLocks(t *testing.T) {
 	const owner1 uint64 = 1
 	var fileIno INode
 
-	require.NoError(t, sys.Modify(ctx, vcfg, func(tx *Tx) error {
+	require.NoError(t, modify(t, sys, ctx, vcfg, func(tx *Tx) error {
 		ino, err := tx.CreateFileAt(ctx, rootINode(), "locked", 0o644, FileParams{
 			Now:       tai64.Now(),
 			BlockSize: 4096,
@@ -255,29 +253,29 @@ func TestLocks(t *testing.T) {
 
 		_, err = tx.ensureSession(ctx, privKey1, tai64.Now())
 		require.NoError(t, err)
-		require.NoError(t, tx.addLock(ctx, id1, owner1, fileIno, LockKindRead, 0, 100))
-		lock1, err := tx.getLock(ctx, fileIno, id1, owner1)
+		require.NoError(t, tx.SetLock(ctx, id1, owner1, fileIno, LockKindRead, 0, 100))
+		lock1, err := tx.GetLock(ctx, fileIno, id1, owner1)
 		require.NoError(t, err)
 		require.Equal(t, uint16(LockKindRead), lock1.Kind())
 		require.Equal(t, uint64(0), lock1.Start())
 		require.Equal(t, uint64(100), lock1.Length())
 		require.Equal(t, uint32(1), requireSessionValue(t, ctx, sys, tx, pubKey1, id1).LockCount())
 
-		err = tx.addLock(ctx, id1, owner1, fileIno, LockKindRead, 0, 100)
+		err = tx.SetLock(ctx, id1, owner1, fileIno, LockKindRead, 0, 100)
 		require.Error(t, err)
 
-		err = tx.addLock(ctx, id1, owner1, fileIno, LockKindWrite, 50, 100)
+		err = tx.SetLock(ctx, id1, owner1, fileIno, LockKindWrite, 50, 100)
 		require.Error(t, err)
 
-		require.NoError(t, tx.removeLock(ctx, id1, owner1, fileIno))
+		require.NoError(t, tx.SetLock(ctx, id1, owner1, fileIno, 0, 0, 0))
 		require.Equal(t, uint32(0), requireSessionValue(t, ctx, sys, tx, pubKey1, id1).LockCount())
-		_, err = tx.getLock(ctx, fileIno, id1, owner1)
+		_, err = tx.GetLock(ctx, fileIno, id1, owner1)
 		require.ErrorIs(t, err, fs.ErrNotExist)
-		require.NoError(t, tx.addLock(ctx, id1, owner1, fileIno, LockKindWrite, 0, 0))
+		require.NoError(t, tx.SetLock(ctx, id1, owner1, fileIno, LockKindWrite, 0, 0))
 		require.Equal(t, uint32(1), requireSessionValue(t, ctx, sys, tx, pubKey1, id1).LockCount())
 		require.NoError(t, tx.dropSession(ctx, id1))
 		requireSessionMissing(t, ctx, tx, id1)
-		_, err = tx.getLock(ctx, fileIno, id1, owner1)
+		_, err = tx.GetLock(ctx, fileIno, id1, owner1)
 		require.ErrorIs(t, err, fs.ErrNotExist)
 		return nil
 	}))
@@ -392,7 +390,7 @@ func TestFindConflictingLockOwners(t *testing.T) {
 	const owner1 uint64 = 1
 	const owner2 uint64 = 2
 
-	require.NoError(t, sys.Modify(ctx, vcfg, func(tx *Tx) error {
+	require.NoError(t, modify(t, sys, ctx, vcfg, func(tx *Tx) error {
 		ino, err := tx.CreateFileAt(ctx, rootINode(), "locked", 0o644, FileParams{
 			Now:       tai64.Now(),
 			BlockSize: 4096,
@@ -400,19 +398,19 @@ func TestFindConflictingLockOwners(t *testing.T) {
 		require.NoError(t, err)
 		_, err = tx.ensureSession(ctx, priv, tai64.Now())
 		require.NoError(t, err)
-		require.NoError(t, tx.addLock(ctx, id, owner1, ino, LockKindWrite, 0, 100))
+		require.NoError(t, tx.SetLock(ctx, id, owner1, ino, LockKindWrite, 0, 100))
 
-		conflict, err := tx.findConflictingLock(ctx, ino, id, owner1, LockKindWrite, 0, 100)
+		conflict, err := tx.FindConflictingLock(ctx, ino, id, owner1, LockKindWrite, 0, 100)
 		require.NoError(t, err)
 		require.Nil(t, conflict)
 
-		conflict, err = tx.findConflictingLock(ctx, ino, id, owner2, LockKindWrite, 0, 100)
+		conflict, err = tx.FindConflictingLock(ctx, ino, id, owner2, LockKindWrite, 0, 100)
 		require.NoError(t, err)
 		require.NotNil(t, conflict)
 		require.Equal(t, owner1, conflict.Owner)
 		require.Equal(t, id, conflict.SessionID)
 
-		conflict, err = tx.findConflictingLock(ctx, ino, id, owner2, LockKindRead, 100, 10)
+		conflict, err = tx.FindConflictingLock(ctx, ino, id, owner2, LockKindRead, 100, 10)
 		require.NoError(t, err)
 		require.Nil(t, conflict)
 		return nil
@@ -421,7 +419,9 @@ func TestFindConflictingLockOwners(t *testing.T) {
 
 func requireSessionValue(t testing.TB, ctx context.Context, sys *System, tx *Tx, pubKey inet256.PublicKey, id inet256.ID) wfscnp.Session {
 	t.Helper()
+	tx.mu.RLock()
 	session, err := tx.getSession(ctx, id)
+	tx.mu.RUnlock()
 	require.NoError(t, err)
 	require.Equal(t, id, sys.pki.NewID(pubKey))
 	return session
@@ -458,16 +458,14 @@ func putTestSession(ctx context.Context, tx *Tx, privKey inet256.PrivateKey, tou
 
 func requireSessionExists(t testing.TB, ctx context.Context, tx *Tx, id inet256.ID) {
 	t.Helper()
-	var value []byte
-	exists, err := tx.sessiontx.Get(ctx, id[:], &value)
+	exists, err := tx.SessionExists(ctx, id)
 	require.NoError(t, err)
 	require.True(t, exists)
 }
 
 func requireSessionMissing(t testing.TB, ctx context.Context, tx *Tx, id inet256.ID) {
 	t.Helper()
-	var value []byte
-	exists, err := tx.sessiontx.Get(ctx, id[:], &value)
+	exists, err := tx.SessionExists(ctx, id)
 	require.NoError(t, err)
 	require.False(t, exists)
 }
@@ -489,4 +487,28 @@ func setupVol(t testing.TB) (*System, VolumeConfig) {
 	})
 	require.NoError(t, sys.Initialize(ctx, *volh, vcfg))
 	return sys, vcfg
+}
+
+func modify(t testing.TB, sys *System, ctx context.Context, vcfg VolumeConfig, f func(tx *Tx) error) error {
+	tx, err := sys.Modify(ctx, vcfg)
+	if err != nil {
+		return err
+	}
+	defer tx.Abort(ctx)
+	if err := f(tx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func view(t testing.TB, sys *System, ctx context.Context, vcfg VolumeConfig, f func(tx *Tx) error) error {
+	tx, err := sys.View(ctx, vcfg)
+	if err != nil {
+		return err
+	}
+	defer tx.Abort(ctx)
+	if err := f(tx); err != nil {
+		return err
+	}
+	return nil
 }

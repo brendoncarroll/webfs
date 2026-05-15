@@ -11,12 +11,15 @@ import (
 	"blobcache.io/blobcache/src/bcsdk"
 	"blobcache.io/blobcache/src/blobcache"
 	capnp "capnproto.org/go/capnp/v3"
+	"github.com/brendoncarroll/webfs/src/internal/gdatcache"
 	"github.com/brendoncarroll/webfs/src/internal/wfscnp"
 	"github.com/cloudflare/circl/sign"
 	"github.com/cloudflare/circl/sign/mldsa/mldsa87"
 	"github.com/gotvc/got/src/gdat"
 	"github.com/gotvc/got/src/gotkv"
+	"go.brendoncarroll.net/exp/sbe"
 	"go.inet256.org/inet256/src/inet256"
+	"golang.org/x/sync/semaphore"
 )
 
 // GID is a globally unique ID that uniquely identifies the filesystem.
@@ -128,7 +131,7 @@ func (sys *System) Initialize(ctx context.Context, volh blobcache.Handle, cfg Vo
 			return err
 		}
 		// setup root
-		tx2 := newTx(root, tx, tx, newMachines(fsp), &sys.pki, nil)
+		tx2 := newFSTx(root, tx, tx, newMachines(fsp), &sys.pki, nil)
 		_, seg := capnp.NewSingleSegmentMessage(nil)
 		node, err := wfscnp.NewRootNode(seg)
 		if err != nil {
@@ -153,60 +156,28 @@ func (sys *System) Initialize(ctx context.Context, volh blobcache.Handle, cfg Vo
 	return nil
 }
 
-func (sys *System) View(ctx context.Context, vcfg VolumeConfig, fn func(*Tx) error) error {
+func (sys *System) View(ctx context.Context, vcfg VolumeConfig) (*Tx, error) {
 	volh, err := sys.bc.OpenFiat(ctx, vcfg.VolumeID, blobcache.Action_ALL)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	txn, err := bcsdk.BeginTx(ctx, sys.bc, *volh, blobcache.TxParams{})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer txn.Abort(ctx)
-	ep, err := sys.bc.Endpoint(ctx)
-	if err != nil {
-		return err
-	}
-	fqoid := blobcache.FQOID{OID: volh.OID, Node: ep.Node}
-	privKey := deriveVolumePrivateKey(&sys.pki, vcfg)
-	txn2, err := sys.wrapTx(ctx, txn, fqoid, vcfg.HashAlgo, privKey)
-	if err != nil {
-		return err
-	}
-	return fn(txn2)
+	return sys.beginTx(ctx, vcfg, txn)
 }
 
-func (sys *System) Modify(ctx context.Context, vcfg VolumeConfig, fn func(*Tx) error) error {
+func (sys *System) Modify(ctx context.Context, vcfg VolumeConfig) (*Tx, error) {
 	volh, err := sys.bc.OpenFiat(ctx, vcfg.VolumeID, blobcache.Action_ALL)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	txn, err := bcsdk.BeginTx(ctx, sys.bc, *volh, blobcache.TxParams{Modify: true})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer txn.Abort(ctx)
-	ep, err := sys.bc.Endpoint(ctx)
-	if err != nil {
-		return err
-	}
-	fqoid := blobcache.FQOID{OID: volh.OID, Node: ep.Node}
-	privKey := deriveVolumePrivateKey(&sys.pki, vcfg)
-	txn2, err := sys.wrapTx(ctx, txn, fqoid, vcfg.HashAlgo, privKey)
-	if err != nil {
-		return err
-	}
-	if err := fn(txn2); err != nil {
-		return err
-	}
-	newRoot, err := txn2.Flush(ctx)
-	if err != nil {
-		return err
-	}
-	if err := txn.Save(ctx, newRoot.Marshal(nil)); err != nil {
-		return err
-	}
-	return txn.Commit(ctx)
+	return sys.beginTx(ctx, vcfg, txn)
 }
 
 // FSParams contains filesystem level parameters.
@@ -259,15 +230,6 @@ func (sys *System) getMachs(fqoid blobcache.FQOID, fp FSParams) *machines {
 	machs := newMachines(fp)
 	sys.machs[fqoid] = machs
 	return machs
-}
-
-func (sys *System) wrapTx(ctx context.Context, txn *bcsdk.Tx, fqoid blobcache.FQOID, hashAlgo blobcache.HashAlgo, privKey inet256.PrivateKey) (*Tx, error) {
-	root, err := LoadState(ctx, txn)
-	if err != nil {
-		return nil, err
-	}
-	machs := sys.getMachs(fqoid, FSParams{HashAlgo: hashAlgo, GID: root.gid, MaxBlobSize: root.maxBlobSize, Salt: root.salt})
-	return newTx(root, txn, txn, machs, &sys.pki, privKey), nil
 }
 
 type INodeStats struct {
@@ -340,4 +302,114 @@ func newMachines(fp FSParams) *machines {
 			KeyedHashFunc: fp.HashAlgo.KeyedHash,
 		}),
 	}
+}
+
+// Tx is a WebFS transaction.
+type Tx struct {
+	bctx *bcsdk.Tx
+	// sem serializes calls to Abort and Commit
+	sem semaphore.Weighted
+
+	FSTx
+}
+
+func (sys *System) beginTx(ctx context.Context, vcfg VolumeConfig, bctx *bcsdk.Tx) (*Tx, error) {
+	root, err := LoadState(ctx, bctx)
+	if err != nil {
+		return nil, err
+	}
+	fqoid := blobcache.FQOID{OID: vcfg.VolumeID, Node: vcfg.NodeID}
+	fsp := FSParams{
+		HashAlgo:    vcfg.HashAlgo,
+		GID:         root.gid,
+		MaxBlobSize: root.maxBlobSize,
+		Salt:        root.salt,
+	}
+	machs := sys.getMachs(fqoid, fsp)
+	privKey := deriveVolumePrivateKey(&sys.pki, vcfg)
+	fstx := newFSTx(root, bctx, bctx, machs, &sys.pki, privKey)
+	return &Tx{
+		bctx: bctx,
+		FSTx: *fstx,
+		sem:  *semaphore.NewWeighted(1),
+	}, nil
+}
+
+func (tx *Tx) save(ctx context.Context) error {
+	fsstate, err := tx.FSTx.Flush(ctx)
+	if err != nil {
+		return err
+	}
+	return SaveState(ctx, tx.bctx, fsstate)
+}
+
+func (tx *Tx) Abort(ctx context.Context) error {
+	if err := tx.sem.Acquire(ctx, 1); err != nil {
+		return err
+	}
+	defer tx.sem.Release(1)
+	return tx.bctx.Abort(ctx)
+}
+
+func (tx *Tx) Commit(ctx context.Context) error {
+	if err := tx.sem.Acquire(ctx, 1); err != nil {
+		return err
+	}
+	defer tx.sem.Release(1)
+	if err := tx.save(ctx); err != nil {
+		return err
+	}
+	return tx.bctx.Commit(ctx)
+}
+
+func newPublicKeyCache(mach *gdat.Machine, pki *inet256.PKI, size int) *gdatcache.Cache[inet256.PublicKey] {
+	marshal := func(x inet256.PublicKey, out []byte) []byte {
+		data, err := pki.MarshalPublicKey(out, x)
+		if err != nil {
+			panic(err)
+		}
+		return data
+	}
+	parse := func(data []byte) (inet256.PublicKey, error) {
+		return pki.ParsePublicKey(data)
+	}
+	return gdatcache.New[inet256.PublicKey](mach, marshal, parse, size)
+}
+
+// openSigned verifies and returns a value from within a signed envelope
+func openSigned(ctx context.Context, c *gdatcache.Cache[inet256.PublicKey], sigctx *inet256.SigCtx, s bcsdk.RO, data []byte) ([]byte, inet256.PublicKey, error) {
+	refData, data, err := sbe.ReadN(data, gdat.RefSize)
+	if err != nil {
+		return nil, nil, err
+	}
+	ref, err := gdat.ParseRef(refData)
+	if err != nil {
+		return nil, nil, err
+	}
+	pubKey, err := c.Get(ctx, s, ref)
+	if err != nil {
+		return nil, nil, err
+	}
+	sigSize := pubKey.Scheme().SignatureSize()
+	if len(data) < sigSize {
+		return nil, nil, fmt.Errorf("too short to contain signature")
+	}
+	msg, sig := data[:len(data)-sigSize], data[len(data)-sigSize:]
+	if !inet256.Verify(sigctx, pubKey, msg, sig) {
+		return nil, nil, fmt.Errorf("invalid signature")
+	}
+	return msg, pubKey, nil
+}
+
+// sealSigned creates a new signed envelope and appends it to out.
+func sealSigned(ctx context.Context, c *gdatcache.Cache[inet256.PublicKey], sigctx *inet256.SigCtx, s bcsdk.WO, privateKey inet256.PrivateKey, msg []byte, out []byte) ([]byte, error) {
+	pubKey := inet256.PublicFromPrivate(privateKey)
+	ref, err := c.Post(ctx, s, pubKey)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, ref.Marshal()...)
+	out = append(out, msg...)
+	out = inet256.Sign(sigctx, privateKey, msg, out)
+	return out, nil
 }

@@ -34,29 +34,36 @@ type LockInfo struct {
 
 var ErrLockConflict = errors.New("lock conflict")
 
-func (tx *Tx) EnsureSession(ctx context.Context, now tai64.TAI64N) (inet256.ID, error) {
+func (tx *FSTx) EnsureSession(ctx context.Context, now tai64.TAI64N) (inet256.ID, error) {
 	if tx.priv == nil {
 		return inet256.ID{}, fmt.Errorf("tx has no private key")
 	}
 	return tx.ensureSession(ctx, tx.priv, now)
 }
 
-func (tx *Tx) GetLock(ctx context.Context, ino INode, sessionID inet256.ID, owner uint64) (wfscnp.LockState, error) {
+func (tx *FSTx) GetLock(ctx context.Context, ino INode, sessionID inet256.ID, owner uint64) (wfscnp.LockState, error) {
+	tx.mu.RLock()
+	defer tx.mu.RUnlock()
 	return tx.getLock(ctx, ino, sessionID, owner)
 }
 
-func (tx *Tx) SetLock(ctx context.Context, sessionID inet256.ID, owner uint64, ino INode, kind LockKind, start, length uint64) error {
+func (tx *FSTx) SetLock(ctx context.Context, sessionID inet256.ID, owner uint64, ino INode, kind LockKind, start, length uint64) error {
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
 	if kind == 0 {
 		return tx.removeLock(ctx, sessionID, owner, ino)
 	}
 	return tx.addLock(ctx, sessionID, owner, ino, kind, start, length)
 }
 
-func (tx *Tx) FindConflictingLock(ctx context.Context, ino INode, sessionID inet256.ID, owner uint64, kind LockKind, start, length uint64) (*LockInfo, error) {
-	return tx.findConflictingLock(ctx, ino, sessionID, owner, kind, start, length)
+func (tx *FSTx) FindConflictingLock(ctx context.Context, ino INode, sessionID inet256.ID, owner uint64, kind LockKind, start, length uint64) (*LockInfo, error) {
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
+	return tx.findConflictingLockLocked(ctx, ino, sessionID, owner, kind, start, length, true)
 }
 
-func (tx *Tx) addLock(ctx context.Context, sessionID inet256.ID, owner uint64, ino INode, kind LockKind, start, length uint64) error {
+// addLock assumes the write lock is held
+func (tx *FSTx) addLock(ctx context.Context, sessionID inet256.ID, owner uint64, ino INode, kind LockKind, start, length uint64) error {
 	if _, err := tx.getSession(ctx, sessionID); err != nil {
 		return err
 	}
@@ -65,7 +72,7 @@ func (tx *Tx) addLock(ctx context.Context, sessionID inet256.ID, owner uint64, i
 	} else if !fsErrNotExist(err) {
 		return err
 	}
-	conflict, err := tx.findConflictingLock(ctx, ino, sessionID, owner, kind, start, length)
+	conflict, err := tx.findConflictingLockLocked(ctx, ino, sessionID, owner, kind, start, length, true)
 	if err != nil {
 		return err
 	}
@@ -82,7 +89,8 @@ func (tx *Tx) addLock(ctx context.Context, sessionID inet256.ID, owner uint64, i
 	return tx.incrementSessionLockCount(ctx, sessionID, 1)
 }
 
-func (tx *Tx) removeLock(ctx context.Context, sessionID inet256.ID, owner uint64, ino INode) error {
+// removeLock assumes the lock is held
+func (tx *FSTx) removeLock(ctx context.Context, sessionID inet256.ID, owner uint64, ino INode) error {
 	if _, err := tx.getLock(ctx, ino, sessionID, owner); err != nil {
 		return err
 	}
@@ -92,7 +100,8 @@ func (tx *Tx) removeLock(ctx context.Context, sessionID inet256.ID, owner uint64
 	return tx.incrementSessionLockCount(ctx, sessionID, -1)
 }
 
-func (tx *Tx) getLock(ctx context.Context, ino INode, sessionID inet256.ID, owner uint64) (wfscnp.LockState, error) {
+// getLock assumes the lock is held
+func (tx *FSTx) getLock(ctx context.Context, ino INode, sessionID inet256.ID, owner uint64) (wfscnp.LockState, error) {
 	var value []byte
 	exists, err := tx.locktx.Get(ctx, makeLockKey(nil, ino, sessionID, owner), &value)
 	if err != nil {
@@ -101,46 +110,34 @@ func (tx *Tx) getLock(ctx context.Context, ino INode, sessionID inet256.ID, owne
 	if !exists {
 		return wfscnp.LockState{}, fs.ErrNotExist
 	}
-	return tx.unmarshalLockValue(ino, sessionID, value)
+	lockData, pubKey, err := openSigned(ctx, tx.pkcache, &lockSigCtx, tx.ros, value)
+	if err != nil {
+		return wfscnp.LockState{}, err
+	}
+	if tx.pki.NewID(pubKey) != sessionID {
+		return wfscnp.LockState{}, fmt.Errorf("lock has wrong signer for session %v", sessionID)
+	}
+	return parseLock(lockData)
 }
 
-func (tx *Tx) putLock(ctx context.Context, ino INode, sessionID inet256.ID, owner uint64, state wfscnp.LockState) error {
+func (tx *FSTx) putLock(ctx context.Context, ino INode, sessionID inet256.ID, owner uint64, state wfscnp.LockState) error {
 	lockData, err := state.Message().Marshal()
 	if err != nil {
 		return err
 	}
-	lockPriv, err := tx.privateKeyForSession(ctx, sessionID)
+	privKey, err := tx.getSessionPrivateKey(ctx, sessionID)
 	if err != nil {
 		return err
 	}
-	lockValue := makeLockValue(nil, lockData, tx.pki.Sign(&lockSigCtx, lockPriv, lockSigMessage(tx.gid, ino, sessionID, lockData), nil))
-	return tx.locktx.Put(ctx, makeLockKey(nil, ino, sessionID, owner), lockValue)
+	val, err := sealSigned(ctx, tx.pkcache, &lockSigCtx, tx.rws, privKey, lockData, nil)
+	if err != nil {
+		return err
+	}
+	return tx.locktx.Put(ctx, makeLockKey(nil, ino, sessionID, owner), val)
 }
 
-func (tx *Tx) unmarshalLockValue(ino INode, sessionID inet256.ID, value []byte) (wfscnp.LockState, error) {
-	lockData, sig, err := parseLockValue(value)
-	if err != nil {
-		return wfscnp.LockState{}, err
-	}
-	session, err := tx.getSession(context.Background(), sessionID)
-	if err != nil {
-		return wfscnp.LockState{}, err
-	}
-	pubKey, err := tx.publicKeyFromSession(sessionID, session)
-	if err != nil {
-		return wfscnp.LockState{}, err
-	}
-	if !tx.pki.Verify(&lockSigCtx, pubKey, lockSigMessage(tx.gid, ino, sessionID, lockData), sig) {
-		return wfscnp.LockState{}, fmt.Errorf("invalid lock signature for inode %v session %v", ino, sessionID)
-	}
-	msg, err := capnp.Unmarshal(lockData)
-	if err != nil {
-		return wfscnp.LockState{}, err
-	}
-	return wfscnp.ReadRootLockState(msg)
-}
-
-func (tx *Tx) deleteLocksForSession(ctx context.Context, sessionID inet256.ID) error {
+// deleteLocksForSession assumes the lock is held
+func (tx *FSTx) deleteLocksForSession(ctx context.Context, sessionID inet256.ID) error {
 	if tx.locktx.Queued() > 0 {
 		if _, err := tx.locktx.Flush(ctx); err != nil {
 			return err
@@ -169,20 +166,8 @@ func (tx *Tx) deleteLocksForSession(ctx context.Context, sessionID inet256.ID) e
 	}
 }
 
-func (tx *Tx) incrementSessionLockCount(ctx context.Context, sessionID inet256.ID, delta int32) error {
-	_, err := tx.editSessionByID(ctx, sessionID, func(session wfscnp.Session) error {
-		next := int64(session.LockCount()) + int64(delta)
-		if next < 0 {
-			return fmt.Errorf("session lock count underflow for %v", sessionID)
-		}
-		session.SetLockCount(uint32(next))
-		return nil
-	})
-	return err
-}
-
-func (tx *Tx) findConflictingLock(ctx context.Context, ino INode, sessionID inet256.ID, owner uint64, kind LockKind, start, length uint64) (*LockInfo, error) {
-	locks, err := tx.listLocks(ctx, ino)
+func (tx *FSTx) findConflictingLockLocked(ctx context.Context, ino INode, sessionID inet256.ID, owner uint64, kind LockKind, start, length uint64, haveWriteLock bool) (*LockInfo, error) {
+	locks, err := tx.listLocks(ctx, ino, haveWriteLock)
 	if err != nil {
 		return nil, err
 	}
@@ -199,8 +184,11 @@ func (tx *Tx) findConflictingLock(ctx context.Context, ino INode, sessionID inet
 	return nil, nil
 }
 
-func (tx *Tx) listLocks(ctx context.Context, ino INode) ([]LockInfo, error) {
+func (tx *FSTx) listLocks(ctx context.Context, ino INode, haveWriteLock bool) ([]LockInfo, error) {
 	if tx.locktx.Queued() > 0 {
+		if !haveWriteLock {
+			return nil, fmt.Errorf("listLocks needs to flush writes, but does not have the write lock")
+		}
 		if _, err := tx.locktx.Flush(ctx); err != nil {
 			return nil, err
 		}
@@ -221,11 +209,11 @@ func (tx *Tx) listLocks(ctx context.Context, ino INode) ([]LockInfo, error) {
 			if !ok || ino2 != ino {
 				continue
 			}
-			state, err := tx.unmarshalLockValue(ino, sessionID, buf[i].Value)
+			lock, err := tx.getLock(ctx, ino, sessionID, owner)
 			if err != nil {
 				return nil, err
 			}
-			ret = append(ret, LockInfo{INode: ino, SessionID: sessionID, Owner: owner, State: state})
+			ret = append(ret, LockInfo{INode: ino, SessionID: sessionID, Owner: owner, State: lock})
 		}
 	}
 }
@@ -268,26 +256,21 @@ func newLockState(holder inet256.ID, kind LockKind, start, length uint64) (wfscn
 }
 
 func makeLockValue(out []byte, lockData []byte, sig []byte) []byte {
-	out = sbe.AppendLP32(out, lockData)
+	out = append(out, lockData...)
 	out = append(out, sig...)
 	return out
 }
 
-func parseLockValue(data []byte) (lockData []byte, sig []byte, _ error) {
-	lockData, sig, err := sbe.ReadLP32(data)
+func parseLock(data []byte) (wfscnp.LockState, error) {
+	msg, err := capnp.Unmarshal(data)
 	if err != nil {
-		return nil, nil, err
+		return wfscnp.LockState{}, err
 	}
-	return lockData, sig, nil
-}
-
-func lockSigMessage(gid [32]byte, ino INode, sessionID inet256.ID, lockData []byte) []byte {
-	msg := make([]byte, 0, len(gid)+len(ino)+len(sessionID)+len(lockData))
-	msg = append(msg, gid[:]...)
-	msg = append(msg, ino[:]...)
-	msg = append(msg, sessionID[:]...)
-	msg = append(msg, lockData...)
-	return msg
+	lstate, err := wfscnp.ReadRootLockState(msg)
+	if err != nil {
+		return wfscnp.LockState{}, err
+	}
+	return lstate, nil
 }
 
 func locksConflict(kindA LockKind, startA, lengthA uint64, kindB LockKind, startB, lengthB uint64) bool {

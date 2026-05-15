@@ -17,23 +17,27 @@ const (
 
 type XAttrKey string
 
-func (tx *Tx) SetXAttr(ctx context.Context, ino INode, key XAttrKey, value []byte) error {
+func (tx *FSTx) SetXAttr(ctx context.Context, ino INode, key XAttrKey, value []byte) error {
 	if err := checkXAttrKey(key); err != nil {
 		return err
 	}
 	if len(value) > MaxXAttrValueSize {
 		return fmt.Errorf("xattr value is too large HAVE: %d WANT <= %d", len(value), MaxXAttrValueSize)
 	}
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
 	if _, err := tx.getNode(ctx, ino); err != nil {
 		return err
 	}
 	return tx.xattrtx.Put(ctx, makeXAttrKey(nil, ino, key), value)
 }
 
-func (tx *Tx) GetXAttr(ctx context.Context, ino INode, key XAttrKey) ([]byte, error) {
+func (tx *FSTx) GetXAttr(ctx context.Context, ino INode, key XAttrKey) ([]byte, error) {
 	if err := checkXAttrKey(key); err != nil {
 		return nil, err
 	}
+	tx.mu.RLock()
+	defer tx.mu.RUnlock()
 	if _, err := tx.getNode(ctx, ino); err != nil {
 		return nil, err
 	}
@@ -48,17 +52,21 @@ func (tx *Tx) GetXAttr(ctx context.Context, ino INode, key XAttrKey) ([]byte, er
 	return value, nil
 }
 
-func (tx *Tx) RemoveXAttr(ctx context.Context, ino INode, key XAttrKey) error {
+func (tx *FSTx) RemoveXAttr(ctx context.Context, ino INode, key XAttrKey) error {
 	if err := checkXAttrKey(key); err != nil {
 		return err
 	}
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
 	if _, err := tx.getNode(ctx, ino); err != nil {
 		return err
 	}
 	return tx.xattrtx.Delete(ctx, makeXAttrKey(nil, ino, key))
 }
 
-func (tx *Tx) ListXAttrs(ctx context.Context, ino INode) ([]XAttrKey, error) {
+func (tx *FSTx) ListXAttrs(ctx context.Context, ino INode) ([]XAttrKey, error) {
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
 	if _, err := tx.getNode(ctx, ino); err != nil {
 		return nil, err
 	}
@@ -97,7 +105,8 @@ func checkXAttrKey(key XAttrKey) error {
 	return nil
 }
 
-func (tx *Tx) deleteXAttrs(ctx context.Context, ino INode) error {
+func (tx *FSTx) deleteXAttrs(ctx context.Context, ino INode) error {
+	// assumes lock is held
 	if _, err := tx.xattrtx.Flush(ctx); err != nil {
 		return err
 	}

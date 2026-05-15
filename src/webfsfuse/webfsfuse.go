@@ -61,6 +61,7 @@ type FS struct {
 	sys     *webfs.System
 	pki     inet256.PKI
 	rootCfg webfs.VolumeConfig
+	tc      txCoord
 	root    Node
 }
 
@@ -69,6 +70,10 @@ func New(sys *webfs.System, pki inet256.PKI, rootCfg webfs.VolumeConfig) FS {
 		sys:     sys,
 		pki:     pki,
 		rootCfg: rootCfg,
+		tc: txCoord{
+			webfs:   sys,
+			rootCfg: rootCfg,
+		},
 	}
 }
 
@@ -88,7 +93,7 @@ type Node struct {
 
 func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	var ent webfs.DirEnt
-	err := n.fsys.sys.View(ctx, n.fsys.rootCfg, func(tx *webfs.Tx) error {
+	err := n.fsys.tc.view(ctx, func(tx *webfs.FSTx) error {
 		var err error
 		ent, err = tx.GetChild(ctx, n.ino, name)
 		return err
@@ -113,7 +118,7 @@ func (n *Node) Getattr(ctx context.Context, _ fs.FileHandle, out *fuse.AttrOut) 
 
 func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 	ents := make([]fuse.DirEntry, 0, 16)
-	err := n.fsys.sys.Modify(ctx, n.fsys.rootCfg, func(tx *webfs.Tx) error {
+	err := n.fsys.tc.modify(ctx, func(tx *webfs.FSTx) error {
 		for ent, err := range tx.ReadDir(ctx, n.ino, "") {
 			if err != nil {
 				return err
@@ -138,7 +143,7 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 func (n *Node) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	childMode := iofs.ModeDir | iofs.FileMode(mode&0o7777)
 	var ino webfs.INode
-	err := n.fsys.sys.Modify(ctx, n.fsys.rootCfg, func(tx *webfs.Tx) error {
+	err := n.fsys.tc.modify(ctx, func(tx *webfs.FSTx) error {
 		var err error
 		ino, err = tx.CreateDirAt(ctx, n.ino, name, childMode)
 		return err
@@ -152,7 +157,7 @@ func (n *Node) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.En
 func (n *Node) Create(ctx context.Context, name string, _ uint32, mode uint32, out *fuse.EntryOut) (*fs.Inode, fs.FileHandle, uint32, syscall.Errno) {
 	childMode := iofs.FileMode(mode & 0o7777)
 	var ino webfs.INode
-	err := n.fsys.sys.Modify(ctx, n.fsys.rootCfg, func(tx *webfs.Tx) error {
+	err := n.fsys.tc.modify(ctx, func(tx *webfs.FSTx) error {
 		var err error
 		ino, err = tx.CreateFileAt(ctx, n.ino, name, childMode, webfs.FileParams{Now: tai64.Now(), BlockSize: 4096})
 		return err
@@ -180,7 +185,7 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, s
 
 func (n *Node) Read(ctx context.Context, _ fs.FileHandle, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
 	var nRead int
-	err := n.fsys.sys.View(ctx, n.fsys.rootCfg, func(tx *webfs.Tx) error {
+	err := n.fsys.tc.view(ctx, func(tx *webfs.FSTx) error {
 		read, err := tx.ReadAt(ctx, n.ino, off, dest)
 		nRead = read
 		if errors.Is(err, io.EOF) {
@@ -199,7 +204,7 @@ func (n *Node) Write(ctx context.Context, fh fs.FileHandle, data []byte, off int
 	if h, ok := fh.(*fileHandle); ok {
 		appendMode = h.append
 	}
-	err := n.fsys.sys.Modify(ctx, n.fsys.rootCfg, func(tx *webfs.Tx) error {
+	err := n.fsys.tc.modify(ctx, func(tx *webfs.FSTx) error {
 		if appendMode {
 			st, err := tx.StatFile(ctx, n.ino)
 			if err != nil {
@@ -226,7 +231,7 @@ func (n *Node) Setattr(ctx context.Context, _ fs.FileHandle, in *fuse.SetAttrIn,
 			return errno
 		}
 		newMode := (mode &^ 0o7777) | iofs.FileMode(modeBits&0o7777)
-		err := n.fsys.sys.Modify(ctx, n.fsys.rootCfg, func(tx *webfs.Tx) error {
+		err := n.fsys.tc.modify(ctx, func(tx *webfs.FSTx) error {
 			return tx.SetMode(ctx, n.ino, newMode)
 		})
 		if err != nil {
@@ -234,7 +239,7 @@ func (n *Node) Setattr(ctx context.Context, _ fs.FileHandle, in *fuse.SetAttrIn,
 		}
 	}
 	if sz, ok := in.GetSize(); ok {
-		err := n.fsys.sys.Modify(ctx, n.fsys.rootCfg, func(tx *webfs.Tx) error {
+		err := n.fsys.tc.modify(ctx, func(tx *webfs.FSTx) error {
 			return tx.Truncate(ctx, n.ino, sz)
 		})
 		if err != nil {
@@ -243,7 +248,7 @@ func (n *Node) Setattr(ctx context.Context, _ fs.FileHandle, in *fuse.SetAttrIn,
 		n.setSize(sz)
 	}
 	if mtime, ok := in.GetMTime(); ok {
-		err := n.fsys.sys.Modify(ctx, n.fsys.rootCfg, func(tx *webfs.Tx) error {
+		err := n.fsys.tc.modify(ctx, func(tx *webfs.FSTx) error {
 			return tx.SetModifiedAt(ctx, n.ino, tai64.FromGoTime(mtime))
 		})
 		if err != nil {
@@ -270,7 +275,7 @@ func (n *Node) Link(ctx context.Context, target fs.InodeEmbedder, name string, o
 			return nil, syscall.EINVAL
 		}
 	}
-	err := n.fsys.sys.Modify(ctx, n.fsys.rootCfg, func(tx *webfs.Tx) error {
+	err := n.fsys.tc.modify(ctx, func(tx *webfs.FSTx) error {
 		return tx.Link(ctx, n.ino, name, targetNode.ino)
 	})
 	if err != nil {
@@ -298,7 +303,7 @@ func (n *Node) Rename(ctx context.Context, name string, newParent fs.InodeEmbedd
 			return syscall.EINVAL
 		}
 	}
-	err := n.fsys.sys.Modify(ctx, n.fsys.rootCfg, func(tx *webfs.Tx) error {
+	err := n.fsys.tc.modify(ctx, func(tx *webfs.FSTx) error {
 		return tx.Rename(ctx, n.ino, name, np.ino, newName)
 	})
 	if err != nil {
@@ -310,7 +315,7 @@ func (n *Node) Rename(ctx context.Context, name string, newParent fs.InodeEmbedd
 func (n *Node) Symlink(ctx context.Context, target, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	var ino webfs.INode
 	mode := iofs.ModeSymlink | 0o777
-	err := n.fsys.sys.Modify(ctx, n.fsys.rootCfg, func(tx *webfs.Tx) error {
+	err := n.fsys.tc.modify(ctx, func(tx *webfs.FSTx) error {
 		var err error
 		ino, err = tx.CreateFileAt(ctx, n.ino, name, mode, webfs.FileParams{Now: tai64.Now(), BlockSize: 4096})
 		if err != nil {
@@ -337,7 +342,7 @@ func (n *Node) Readlink(ctx context.Context) ([]byte, syscall.Errno) {
 		return nil, syscall.EINVAL
 	}
 	var out []byte
-	err := n.fsys.sys.View(ctx, n.fsys.rootCfg, func(tx *webfs.Tx) error {
+	err := n.fsys.tc.view(ctx, func(tx *webfs.FSTx) error {
 		st, err := tx.StatFile(ctx, n.ino)
 		if err != nil {
 			return err
@@ -364,7 +369,7 @@ func (n *Node) Allocate(ctx context.Context, _ fs.FileHandle, off uint64, size u
 		return 0
 	}
 	end := off + size
-	err := n.fsys.sys.Modify(ctx, n.fsys.rootCfg, func(tx *webfs.Tx) error {
+	err := n.fsys.tc.modify(ctx, func(tx *webfs.FSTx) error {
 		st, err := tx.StatFile(ctx, n.ino)
 		if err != nil {
 			return err
@@ -383,7 +388,7 @@ func (n *Node) Allocate(ctx context.Context, _ fs.FileHandle, off uint64, size u
 
 func (n *Node) Lseek(ctx context.Context, _ fs.FileHandle, off uint64, whence uint32) (uint64, syscall.Errno) {
 	var sz uint64
-	err := n.fsys.sys.View(ctx, n.fsys.rootCfg, func(tx *webfs.Tx) error {
+	err := n.fsys.tc.view(ctx, func(tx *webfs.FSTx) error {
 		st, err := tx.StatFile(ctx, n.ino)
 		if err != nil {
 			return err
@@ -412,7 +417,7 @@ func (n *Node) Lseek(ctx context.Context, _ fs.FileHandle, off uint64, whence ui
 
 func (n *Node) Getxattr(ctx context.Context, attr string, dest []byte) (uint32, syscall.Errno) {
 	var value []byte
-	err := n.fsys.sys.View(ctx, n.fsys.rootCfg, func(tx *webfs.Tx) error {
+	err := n.fsys.tc.view(ctx, func(tx *webfs.FSTx) error {
 		var err error
 		value, err = tx.GetXAttr(ctx, n.ino, webfs.XAttrKey(attr))
 		return err
@@ -438,7 +443,7 @@ func (n *Node) Setxattr(ctx context.Context, attr string, data []byte, flags uin
 	if flags&(unix.XATTR_CREATE|unix.XATTR_REPLACE) == (unix.XATTR_CREATE | unix.XATTR_REPLACE) {
 		return syscall.EINVAL
 	}
-	err := n.fsys.sys.Modify(ctx, n.fsys.rootCfg, func(tx *webfs.Tx) error {
+	err := n.fsys.tc.modify(ctx, func(tx *webfs.FSTx) error {
 		_, err := tx.GetXAttr(ctx, n.ino, webfs.XAttrKey(attr))
 		exists := err == nil
 		if err != nil && !errors.Is(err, iofs.ErrNotExist) {
@@ -462,7 +467,7 @@ func (n *Node) Setxattr(ctx context.Context, attr string, data []byte, flags uin
 }
 
 func (n *Node) Removexattr(ctx context.Context, attr string) syscall.Errno {
-	err := n.fsys.sys.Modify(ctx, n.fsys.rootCfg, func(tx *webfs.Tx) error {
+	err := n.fsys.tc.modify(ctx, func(tx *webfs.FSTx) error {
 		if _, err := tx.GetXAttr(ctx, n.ino, webfs.XAttrKey(attr)); err != nil {
 			return err
 		}
@@ -479,7 +484,7 @@ func (n *Node) Removexattr(ctx context.Context, attr string) syscall.Errno {
 
 func (n *Node) Listxattr(ctx context.Context, dest []byte) (uint32, syscall.Errno) {
 	var keys []webfs.XAttrKey
-	err := n.fsys.sys.View(ctx, n.fsys.rootCfg, func(tx *webfs.Tx) error {
+	err := n.fsys.tc.view(ctx, func(tx *webfs.FSTx) error {
 		var err error
 		keys, err = tx.ListXAttrs(ctx, n.ino)
 		return err
@@ -526,7 +531,7 @@ func (f *fileHandle) Getlk(ctx context.Context, owner uint64, lk *fuse.FileLock,
 	if err != nil {
 		return toErrno(err)
 	}
-	err = f.node.fsys.sys.View(ctx, f.node.fsys.rootCfg, func(tx *webfs.Tx) error {
+	err = f.node.fsys.tc.view(ctx, func(tx *webfs.FSTx) error {
 		conflict, err := tx.FindConflictingLock(ctx, f.node.ino, sessionID, owner, kind, start, length)
 		if err != nil {
 			return err
@@ -563,7 +568,7 @@ func (f *fileHandle) setlk(ctx context.Context, owner uint64, lk *fuse.FileLock,
 		return errno
 	}
 	var sessionID inet256.ID
-	err := f.node.fsys.sys.Modify(ctx, f.node.fsys.rootCfg, func(tx *webfs.Tx) error {
+	err := f.node.fsys.tc.modify(ctx, func(tx *webfs.FSTx) error {
 		var err error
 		sessionID, err = tx.EnsureSession(ctx, tai64.Now())
 		if err != nil {
@@ -605,7 +610,7 @@ func (f *fileHandle) Release(ctx context.Context) syscall.Errno {
 	if len(owners) == 0 {
 		return 0
 	}
-	err := f.node.fsys.sys.Modify(ctx, f.node.fsys.rootCfg, func(tx *webfs.Tx) error {
+	err := f.node.fsys.tc.modify(ctx, func(tx *webfs.FSTx) error {
 		sessionID, err := tx.EnsureSession(ctx, tai64.Now())
 		if err != nil {
 			return err
@@ -633,7 +638,7 @@ func (fsys *FS) lockSessionID() (inet256.ID, error) {
 }
 
 func (n *Node) Unlink(ctx context.Context, name string) syscall.Errno {
-	err := n.fsys.sys.Modify(ctx, n.fsys.rootCfg, func(tx *webfs.Tx) error {
+	err := n.fsys.tc.modify(ctx, func(tx *webfs.FSTx) error {
 		ent, err := tx.GetChild(ctx, n.ino, name)
 		if err != nil {
 			return err
@@ -654,7 +659,7 @@ func (n *Node) Unlink(ctx context.Context, name string) syscall.Errno {
 }
 
 func (n *Node) Rmdir(ctx context.Context, name string) syscall.Errno {
-	err := n.fsys.sys.Modify(ctx, n.fsys.rootCfg, func(tx *webfs.Tx) error {
+	err := n.fsys.tc.modify(ctx, func(tx *webfs.FSTx) error {
 		ent, err := tx.GetChild(ctx, n.ino, name)
 		if err != nil {
 			return err
@@ -736,7 +741,7 @@ func (n *Node) refreshStats(ctx context.Context) (iofs.FileMode, uint64, uint32,
 	var size uint64
 	var links uint32 = 1
 	var mtime time.Time
-	err := n.fsys.sys.View(ctx, n.fsys.rootCfg, func(tx *webfs.Tx) error {
+	err := n.fsys.tc.view(ctx, func(tx *webfs.FSTx) error {
 		m, err := tx.GetMode(ctx, n.ino)
 		if err != nil {
 			return err
@@ -828,7 +833,7 @@ func fuseLockTypeToWebfs(typ uint32) (webfs.LockKind, syscall.Errno) {
 
 func (n *Node) lockSessionID(ctx context.Context) (inet256.ID, error) {
 	var sessionID inet256.ID
-	err := n.fsys.sys.Modify(ctx, n.fsys.rootCfg, func(tx *webfs.Tx) error {
+	err := n.fsys.tc.modify(ctx, func(tx *webfs.FSTx) error {
 		id, err := tx.EnsureSession(ctx, tai64.Now())
 		if err != nil {
 			return err

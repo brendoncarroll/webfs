@@ -8,6 +8,7 @@ import (
 	"blobcache.io/blobcache/src/bcsdk"
 	"blobcache.io/blobcache/src/blobcache"
 	capnp "capnproto.org/go/capnp/v3"
+	"github.com/brendoncarroll/webfs/src/internal/gdatcache"
 	"github.com/brendoncarroll/webfs/src/internal/wfscnp"
 	"github.com/gotvc/got/src/gdat"
 	"github.com/gotvc/got/src/gotkv"
@@ -20,17 +21,18 @@ type Linker interface {
 	Unlink(ctx context.Context, targets []blobcache.LinkTokenID) error
 }
 
-// Tx is a transaction on a webfs volume.
-type Tx struct {
+// FSTx is a transaction on a single webfs volume's filesystem state.
+type FSTx struct {
 	// prev is the previous existing state, without any pending changes
-	prev  FSState
-	ros   bcsdk.RO
-	rws   bcsdk.RW
-	link  Linker
-	gid   GID
-	pki   *inet256.PKI
-	priv  inet256.PrivateKey
-	fdata *gdat.Machine
+	prev      FSState
+	ros       bcsdk.RO
+	rws       bcsdk.RW
+	volLinker Linker
+	gid       GID
+	pki       *inet256.PKI
+	priv      inet256.PrivateKey
+	fdata     *gdat.Machine
+	pkcache   *gdatcache.Cache[inet256.PublicKey]
 
 	// mu guards all the gotkvTx's
 	mu         sync.RWMutex
@@ -41,17 +43,18 @@ type Tx struct {
 	inodeCache map[INode]wfscnp.Node
 }
 
-func newTx(prev FSState, s bcsdk.RW, link Linker, machs *machines, pki *inet256.PKI, priv inet256.PrivateKey) *Tx {
-	return &Tx{
-		prev: prev,
-		ros:  s,
-		rws:  s,
-		link: link,
-		gid:  prev.gid,
-		pki:  pki,
-		priv: priv,
+func newFSTx(prev FSState, s bcsdk.RW, link Linker, machs *machines, pki *inet256.PKI, priv inet256.PrivateKey) *FSTx {
+	return &FSTx{
+		prev:      prev,
+		ros:       s,
+		rws:       s,
+		volLinker: link,
+		gid:       prev.gid,
+		pki:       pki,
+		priv:      priv,
 
 		fdata:     &machs.fdata,
+		pkcache:   newPublicKeyCache(&machs.fdata, pki, 16),
 		inodetx:   machs.inodekv.NewTx(s, prev.inodes),
 		xattrtx:   machs.xattrkv.NewTx(s, prev.xattrs),
 		sessiontx: machs.sessionkv.NewTx(s, prev.sessions),
@@ -60,7 +63,9 @@ func newTx(prev FSState, s bcsdk.RW, link Linker, machs *machines, pki *inet256.
 }
 
 // Flush writes out the changes to the store and returns a new root.
-func (tx *Tx) Flush(ctx context.Context) (FSState, error) {
+func (tx *FSTx) Flush(ctx context.Context) (FSState, error) {
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
 	inodekvroot, err := tx.inodetx.Flush(ctx)
 	if err != nil {
 		return FSState{}, err
@@ -84,7 +89,8 @@ func (tx *Tx) Flush(ctx context.Context) (FSState, error) {
 	return tx.prev, nil
 }
 
-func (tx *Tx) getNode(ctx context.Context, ino INode) (wfscnp.Node, error) {
+// getNode assumes the lock is held
+func (tx *FSTx) getNode(ctx context.Context, ino INode) (wfscnp.Node, error) {
 	if tx.inodeCache != nil {
 		if cached, exists := tx.inodeCache[ino]; exists {
 			return cached, nil
@@ -112,7 +118,8 @@ func (tx *Tx) getNode(ctx context.Context, ino INode) (wfscnp.Node, error) {
 	return ret, nil
 }
 
-func (tx *Tx) putNode(ctx context.Context, ino INode, node wfscnp.Node) error {
+// putNode overwrites a node.  It requires the lock.
+func (tx *FSTx) putNode(ctx context.Context, ino INode, node wfscnp.Node) error {
 	msg := node.Message()
 	if msg == nil {
 		return fmt.Errorf("cannot write invalid node for inode (%v)", ino)
@@ -131,11 +138,16 @@ func (tx *Tx) putNode(ctx context.Context, ino INode, node wfscnp.Node) error {
 	return nil
 }
 
-func (tx *Tx) setRoot(ctx context.Context, node wfscnp.Node) error {
+// setRoot acquires the lock and then calls putNode on the root inode
+func (tx *FSTx) setRoot(ctx context.Context, node wfscnp.Node) error {
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
 	return tx.putNode(ctx, INode{}, node)
 }
 
-func (tx *Tx) StatINode(ctx context.Context, ino INode) (INodeStats, error) {
+func (tx *FSTx) StatINode(ctx context.Context, ino INode) (INodeStats, error) {
+	tx.mu.RLock()
+	defer tx.mu.RUnlock()
 	node, err := tx.getNode(ctx, ino)
 	if err != nil {
 		return INodeStats{}, err
@@ -143,7 +155,9 @@ func (tx *Tx) StatINode(ctx context.Context, ino INode) (INodeStats, error) {
 	return INodeStats{RefCount: node.RefCount()}, nil
 }
 
-func (tx *Tx) GetModifiedAt(ctx context.Context, ino INode) (tai64.TAI64N, error) {
+func (tx *FSTx) GetModifiedAt(ctx context.Context, ino INode) (tai64.TAI64N, error) {
+	tx.mu.RLock()
+	defer tx.mu.RUnlock()
 	node, err := tx.getNode(ctx, ino)
 	if err != nil {
 		return tai64.TAI64N{}, err
@@ -155,7 +169,9 @@ func (tx *Tx) GetModifiedAt(ctx context.Context, ino INode) (tai64.TAI64N, error
 	return tai64.TAI64N{Seconds: ts.Seconds(), Nanoseconds: ts.Nanoseconds()}, nil
 }
 
-func (tx *Tx) SetModifiedAt(ctx context.Context, ino INode, t tai64.TAI64N) error {
+func (tx *FSTx) SetModifiedAt(ctx context.Context, ino INode, t tai64.TAI64N) error {
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
 	node, err := tx.getNode(ctx, ino)
 	if err != nil {
 		return err

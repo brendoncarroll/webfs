@@ -26,18 +26,22 @@ type FileParams struct {
 	Size      uint64
 }
 
-func (tx *Tx) CreateFileAt(ctx context.Context, parent INode, name string, mode fs.FileMode, fp FileParams) (INode, error) {
+func (tx *FSTx) CreateFileAt(ctx context.Context, parent INode, name string, mode fs.FileMode, fp FileParams) (INode, error) {
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
 	ino, err := tx.createFile(ctx, fp, mode)
 	if err != nil {
 		return INode{}, err
 	}
-	if err := tx.Link(ctx, parent, name, ino); err != nil {
+	if err := tx.link(ctx, parent, name, ino); err != nil {
 		return INode{}, err
 	}
 	return ino, nil
 }
 
-func (tx *Tx) createFile(ctx context.Context, fp FileParams, mode fs.FileMode) (INode, error) {
+// createFile assumes the lock is held
+func (tx *FSTx) createFile(ctx context.Context, fp FileParams, mode fs.FileMode) (INode, error) {
+	// assumes lock is held
 	if fp.BlockSize == 0 {
 		return INode{}, fmt.Errorf("block size must be > 0")
 	}
@@ -74,7 +78,8 @@ func (tx *Tx) createFile(ctx context.Context, fp FileParams, mode fs.FileMode) (
 	return ino, nil
 }
 
-func (tx *Tx) getFile(ctx context.Context, ino INode) (wfscnp.File, wfscnp.Node, error) {
+// getFile assumes the lock is held
+func (tx *FSTx) getFile(ctx context.Context, ino INode) (wfscnp.File, wfscnp.Node, error) {
 	node, err := tx.getNode(ctx, ino)
 	if err != nil {
 		return wfscnp.File{}, wfscnp.Node{}, err
@@ -87,6 +92,13 @@ func (tx *Tx) getFile(ctx context.Context, ino INode) (wfscnp.File, wfscnp.Node,
 		return wfscnp.File{}, wfscnp.Node{}, err
 	}
 	return file, node, nil
+}
+
+// getFile acquires the lock and then calls getFileLocked
+func (tx *FSTx) lockAndGetFile(ctx context.Context, ino INode) (wfscnp.File, wfscnp.Node, error) {
+	tx.mu.RLock()
+	defer tx.mu.RUnlock()
+	return tx.getFile(ctx, ino)
 }
 
 func setNodeMode(node wfscnp.Node, mode fs.FileMode) {
@@ -108,7 +120,13 @@ func nodeMode(node wfscnp.Node) fs.FileMode {
 	}
 }
 
-func (tx *Tx) GetMode(ctx context.Context, ino INode) (fs.FileMode, error) {
+func (tx *FSTx) GetMode(ctx context.Context, ino INode) (fs.FileMode, error) {
+	tx.mu.RLock()
+	defer tx.mu.RUnlock()
+	return tx.getModeLocked(ctx, ino)
+}
+
+func (tx *FSTx) getModeLocked(ctx context.Context, ino INode) (fs.FileMode, error) {
 	node, err := tx.getNode(ctx, ino)
 	if err != nil {
 		return 0, err
@@ -120,7 +138,9 @@ func (tx *Tx) GetMode(ctx context.Context, ino INode) (fs.FileMode, error) {
 	return mode, nil
 }
 
-func (tx *Tx) SetMode(ctx context.Context, ino INode, mode fs.FileMode) error {
+func (tx *FSTx) SetMode(ctx context.Context, ino INode, mode fs.FileMode) error {
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
 	node, err := tx.getNode(ctx, ino)
 	if err != nil {
 		return err
@@ -132,15 +152,17 @@ func (tx *Tx) SetMode(ctx context.Context, ino INode, mode fs.FileMode) error {
 	return tx.putNode(ctx, ino, node)
 }
 
-func (tx *Tx) StatFile(ctx context.Context, ino INode) (FileInfo, error) {
-	file, _, err := tx.getFile(ctx, ino)
+func (tx *FSTx) StatFile(ctx context.Context, ino INode) (FileInfo, error) {
+	file, _, err := tx.lockAndGetFile(ctx, ino)
 	if err != nil {
 		return FileInfo{}, err
 	}
 	return FileInfo{Size: file.Size(), BlockSize: file.BlockSize()}, nil
 }
 
-func (tx *Tx) Truncate(ctx context.Context, ino INode, size uint64) error {
+func (tx *FSTx) Truncate(ctx context.Context, ino INode, size uint64) error {
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
 	file, node, err := tx.getFile(ctx, ino)
 	if err != nil {
 		return err
@@ -178,33 +200,39 @@ func (tx *Tx) Truncate(ctx context.Context, ino INode, size uint64) error {
 
 // WriteBlock writes buf, whos length must match the file's block size to the file.
 // Writing an all zero block deletes the entry for the block.
-func (tx *Tx) WriteBlock(ctx context.Context, ino INode, blockno uint64, buf []byte) error {
-	file, _, err := tx.getFile(ctx, ino)
+func (tx *FSTx) WriteBlock(ctx context.Context, ino INode, blockno uint64, buf []byte) error {
+	file, _, err := tx.lockAndGetFile(ctx, ino)
 	if err != nil {
 		return err
 	}
-	if int(file.BlockSize()) != len(buf) {
-		return fmt.Errorf("buffer length is different from block size HAVE: %d WANT: %d", len(buf), file.BlockSize())
+	blockSize := file.BlockSize()
+
+	if int(blockSize) != len(buf) {
+		return fmt.Errorf("buffer length is different from block size HAVE: %d WANT: %d", len(buf), blockSize)
 	}
 	return tx.writeBlock(ctx, ino, blockno, buf)
 }
 
-func (tx *Tx) writeBlock(ctx context.Context, ino INode, blockno uint64, buf []byte) error {
+func (tx *FSTx) writeBlock(ctx context.Context, ino INode, blockno uint64, buf []byte) error {
 	key := makeBlockKey(nil, ino, blockno)
 	if isAllZero(buf) {
+		tx.mu.Lock()
+		defer tx.mu.Unlock()
 		return tx.inodetx.Delete(ctx, key)
 	}
 	ref, err := tx.fdata.Post(ctx, tx.rws, buf)
 	if err != nil {
 		return err
 	}
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
 	return tx.inodetx.Put(ctx, key, ref.Marshal())
 }
 
 // ReadBlock reads the blockno into buf.  If buf is short, data is written until buf is full, then nil is returned.
 // If there is no block
-func (tx *Tx) ReadBlock(ctx context.Context, ino INode, blockno uint64, buf []byte) error {
-	file, _, err := tx.getFile(ctx, ino)
+func (tx *FSTx) ReadBlock(ctx context.Context, ino INode, blockno uint64, buf []byte) error {
+	file, _, err := tx.lockAndGetFile(ctx, ino)
 	if err != nil {
 		return err
 	}
@@ -212,10 +240,14 @@ func (tx *Tx) ReadBlock(ctx context.Context, ino INode, blockno uint64, buf []by
 }
 
 // readBlock assumes that ino refers to a valid file node in this transaction
-func (tx *Tx) readBlock(ctx context.Context, ino INode, blockno uint64, blockSize uint32, buf []byte) error {
+func (tx *FSTx) readBlock(ctx context.Context, ino INode, blockno uint64, blockSize uint32, buf []byte) error {
 	key := makeBlockKey(nil, ino, blockno)
 	var refData []byte
-	exists, err := tx.inodetx.Get(ctx, key, &refData)
+	exists, err := func() (bool, error) {
+		tx.mu.RLock()
+		defer tx.mu.RUnlock()
+		return tx.inodetx.Get(ctx, key, &refData)
+	}()
 	if err != nil {
 		return err
 	}
@@ -243,14 +275,15 @@ func (tx *Tx) readBlock(ctx context.Context, ino INode, blockno uint64, blockSiz
 }
 
 // WriteAt writes the contents of buf, starting at offset within the file.
-func (tx *Tx) WriteAt(ctx context.Context, ino INode, offset int64, buf []byte) error {
+func (tx *FSTx) WriteAt(ctx context.Context, ino INode, offset int64, buf []byte) error {
 	if offset < 0 {
 		return fmt.Errorf("offset cannot be negative")
 	}
 	if len(buf) == 0 {
 		return nil
 	}
-	file, node, err := tx.getFile(ctx, ino)
+
+	file, _, err := tx.lockAndGetFile(ctx, ino)
 	if err != nil {
 		return err
 	}
@@ -283,6 +316,14 @@ func (tx *Tx) WriteAt(ctx context.Context, ino INode, offset int64, buf []byte) 
 		curOff += int64(toWrite)
 	}
 	end := uint64(offset) + uint64(len(buf))
+
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
+	// re-read file size under lock to be sure
+	file, node, err := tx.getFile(ctx, ino)
+	if err != nil {
+		return err
+	}
 	if end > file.Size() {
 		file.SetSize(end)
 		if err := tx.putNode(ctx, ino, node); err != nil {
@@ -292,25 +333,28 @@ func (tx *Tx) WriteAt(ctx context.Context, ino INode, offset int64, buf []byte) 
 	return nil
 }
 
-func (tx *Tx) ReadAt(ctx context.Context, ino INode, offset int64, buf []byte) (int, error) {
+func (tx *FSTx) ReadAt(ctx context.Context, ino INode, offset int64, buf []byte) (int, error) {
 	if offset < 0 {
 		return 0, fmt.Errorf("offset cannot be negative")
 	}
 	if len(buf) == 0 {
 		return 0, nil
 	}
-	finfo, _, err := tx.getFile(ctx, ino)
+
+	file, _, err := tx.lockAndGetFile(ctx, ino)
 	if err != nil {
 		return 0, err
 	}
-	if uint64(offset) >= finfo.Size() {
+
+	if uint64(offset) >= file.Size() {
 		return 0, io.EOF
 	}
-	blockSize := int64(finfo.BlockSize())
+	blockSize := int64(file.BlockSize())
 	if blockSize <= 0 {
 		return 0, fmt.Errorf("inode %v has invalid block size %d", ino, blockSize)
 	}
-	toRead := min(int64(len(buf)), int64(finfo.Size()-uint64(offset)))
+	toRead := min(int64(len(buf)), int64(file.Size()-uint64(offset)))
+
 	remaining := int(toRead)
 	read := 0
 	curOff := offset

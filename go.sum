@@ -139,8 +139,8 @@ go.brendoncarroll.net/stdctx v0.0.0-20241118190518-40d09f4d11e7 h1:Fj7e7nplSTGgh
 go.brendoncarroll.net/stdctx v0.0.0-20241118190518-40d09f4d11e7/go.mod h1:YbaFU91phL0COvkZiVxb7ecv2xAYTZ5DNjZhMPsWvTo=
 go.brendoncarroll.net/tai64 v0.0.0-20241118171318-6e12d283d5e4 h1:Ydymf5QEZYCWlJlEmD3YkgKeTK+IYup6dHZd4RThHHw=
 go.brendoncarroll.net/tai64 v0.0.0-20241118171318-6e12d283d5e4/go.mod h1:6UyXOp+n048sH0HBRv4eUfJK/2c03FktUFCXK0VvEfU=
-go.inet256.org/inet256 v0.0.8 h1:uODoKrbAqBYOXX3LFwQy00T4EqeWGxNhIYiW9RoL+tE=
-go.inet256.org/inet256 v0.0.8/go.mod h1:ODD3g5nv3YPj0MyaezesgUMwy0SodK6eaOemmpoy/4s=
+go.inet256.org/inet256 v0.0.9-0.20260515191758-f465b29c8f1f h1:WuX1uDDkCDBOqEc07mLM7LDo2UgVstXWpXqhdq3WqrE=
+go.inet256.org/inet256 v0.0.9-0.20260515191758-f465b29c8f1f/go.mod h1:ODD3g5nv3YPj0MyaezesgUMwy0SodK6eaOemmpoy/4s=
 go.uber.org/goleak v1.3.0 h1:2K3zAYmnTNqV73imy9J1T3WC+gmCePx2hEGkimedGto=
 go.uber.org/goleak v1.3.0/go.mod h1:CoHD4mav9JJNrW/WLlf7HGZPjdw8EucARQHekz1X6bE=
 go.uber.org/mock v0.5.2 h1:LbtPTcP8A5k9WPXj54PPPbjcI4Y6lhyOZXn+VS7wNko=

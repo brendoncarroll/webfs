@@ -16,10 +16,10 @@ import (
 	"github.com/cloudflare/circl/sign/mldsa/mldsa87"
 	"github.com/gotvc/got/src/gdat"
 	"github.com/gotvc/got/src/gotkv"
-	"go.brendoncarroll.net/tai64"
 	"go.inet256.org/inet256/src/inet256"
 )
 
+// GID is a globally unique ID that uniquely identifies the filesystem.
 type GID = blobcache.CID
 
 const MLDSA87 = "mldsa87"
@@ -31,7 +31,7 @@ type VolumeConfig struct {
 	GID            GID                `json:"gid"`
 	DEK            blobcache.DEK      `json:"dek"`
 	PrivateKeySeed blobcache.DEK      `json:"private"`
-	// SignAlgo is the signature algorithm to act as.
+	// SignAlgo is the signature algorithm to use for signing.
 	SignAlgo string `json:"sign_algo"`
 }
 
@@ -49,69 +49,6 @@ func DefaultPKI() inet256.PKI {
 		Schemes: map[string]sign.Scheme{
 			MLDSA87: mldsa87.Scheme(),
 		},
-	}
-}
-
-type machines struct {
-	// fdata manages posting and getting file data
-	fdata gdat.Machine
-	// inodekv manages interactions with the inode table.
-	inodekv gotkv.Machine
-	// xattrkv manages interactions with the xattrs table.
-	xattrkv gotkv.Machine
-	// sessionkv manages interactions with the sessions table.
-	sessionkv gotkv.Machine
-	// lockkv manages interactions with the locks table.
-	lockkv gotkv.Machine
-}
-
-func newMachines(fp FSParams) *machines {
-	const (
-		filedata  = "filedata"
-		inodekv   = "inodekv"
-		xattrkv   = "xattrkv"
-		sessionkv = "sessionkv"
-		lockkv    = "lockkv"
-	)
-	var dataSalt [32]byte
-	gdat.DeriveKey(dataSalt[:], &fp.Salt, []byte(filedata))
-	var inokvSalt [32]byte
-	gdat.DeriveKey(inokvSalt[:], &fp.Salt, []byte(inodekv))
-	var xattrkvSalt [32]byte
-	gdat.DeriveKey(xattrkvSalt[:], &fp.Salt, []byte(xattrkv))
-	var sessionkvSalt [32]byte
-	gdat.DeriveKey(sessionkvSalt[:], &fp.Salt, []byte(sessionkv))
-	var lockkvSalt [32]byte
-	gdat.DeriveKey(lockkvSalt[:], &fp.Salt, []byte(lockkv))
-	return &machines{
-		fdata: *gdat.NewMachine(gdat.Params{
-			Salt:          dataSalt,
-			KeyedHashFunc: fp.HashAlgo.KeyedHash,
-		}),
-		inodekv: gotkv.NewMachine(gotkv.Params{
-			Salt:          inokvSalt,
-			MaxSize:       int(fp.MaxBlobSize),
-			MeanSize:      1 << 13,
-			KeyedHashFunc: fp.HashAlgo.KeyedHash,
-		}),
-		xattrkv: gotkv.NewMachine(gotkv.Params{
-			Salt:          xattrkvSalt,
-			MaxSize:       int(fp.MaxBlobSize),
-			MeanSize:      1 << 13,
-			KeyedHashFunc: fp.HashAlgo.KeyedHash,
-		}),
-		sessionkv: gotkv.NewMachine(gotkv.Params{
-			Salt:          sessionkvSalt,
-			MaxSize:       int(fp.MaxBlobSize),
-			MeanSize:      1 << 13,
-			KeyedHashFunc: fp.HashAlgo.KeyedHash,
-		}),
-		lockkv: gotkv.NewMachine(gotkv.Params{
-			Salt:          lockkvSalt,
-			MaxSize:       int(fp.MaxBlobSize),
-			MeanSize:      1 << 13,
-			KeyedHashFunc: fp.HashAlgo.KeyedHash,
-		}),
 	}
 }
 
@@ -333,50 +270,8 @@ func (sys *System) wrapTx(ctx context.Context, txn *bcsdk.Tx, fqoid blobcache.FQ
 	return newTx(root, txn, txn, machs, &sys.pki, privKey), nil
 }
 
-type Linker interface {
-	Link(ctx context.Context, target blobcache.Handle, mask blobcache.ActionSet) (*blobcache.LinkToken, error)
-	Unlink(ctx context.Context, targets []blobcache.LinkTokenID) error
-}
-
-// Tx is a transaction on a webfs volume.
-type Tx struct {
-	// prev is the previous existing state, without any pending changes
-	prev FSState
-	ros  bcsdk.RO
-	rws  bcsdk.RW
-	link Linker
-	gid  GID
-	pki  *inet256.PKI
-	priv inet256.PrivateKey
-
-	fdata      *gdat.Machine
-	inodetx    *gotkv.Tx
-	xattrtx    *gotkv.Tx
-	sessiontx  *gotkv.Tx
-	locktx     *gotkv.Tx
-	inodeCache map[INode]wfscnp.Node
-}
-
 type INodeStats struct {
 	RefCount uint32
-}
-
-func newTx(prev FSState, s bcsdk.RW, link Linker, machs *machines, pki *inet256.PKI, priv inet256.PrivateKey) *Tx {
-	return &Tx{
-		prev: prev,
-		ros:  s,
-		rws:  s,
-		link: link,
-		gid:  prev.gid,
-		pki:  pki,
-		priv: priv,
-
-		fdata:     &machs.fdata,
-		inodetx:   machs.inodekv.NewTx(s, prev.inodes),
-		xattrtx:   machs.xattrkv.NewTx(s, prev.xattrs),
-		sessiontx: machs.sessionkv.NewTx(s, prev.sessions),
-		locktx:    machs.lockkv.NewTx(s, prev.locks),
-	}
 }
 
 func deriveVolumePrivateKey(pki *inet256.PKI, vcfg VolumeConfig) inet256.PrivateKey {
@@ -384,115 +279,65 @@ func deriveVolumePrivateKey(pki *inet256.PKI, vcfg VolumeConfig) inet256.Private
 	return priv
 }
 
-// Flush writes out the changes to the store and returns a new root.
-func (tx *Tx) Flush(ctx context.Context) (FSState, error) {
-	inodekvroot, err := tx.inodetx.Flush(ctx)
-	if err != nil {
-		return FSState{}, err
-	}
-	xattrkvroot, err := tx.xattrtx.Flush(ctx)
-	if err != nil {
-		return FSState{}, err
-	}
-	sessionkvroot, err := tx.sessiontx.Flush(ctx)
-	if err != nil {
-		return FSState{}, err
-	}
-	lockkvroot, err := tx.locktx.Flush(ctx)
-	if err != nil {
-		return FSState{}, err
-	}
-	tx.prev.inodes = inodekvroot
-	tx.prev.xattrs = xattrkvroot
-	tx.prev.sessions = sessionkvroot
-	tx.prev.locks = lockkvroot
-	return tx.prev, nil
+type machines struct {
+	// fdata manages posting and getting file data
+	fdata gdat.Machine
+	// inodekv manages interactions with the inode table.
+	inodekv gotkv.Machine
+	// xattrkv manages interactions with the xattrs table.
+	xattrkv gotkv.Machine
+	// sessionkv manages interactions with the sessions table.
+	sessionkv gotkv.Machine
+	// lockkv manages interactions with the locks table.
+	lockkv gotkv.Machine
 }
 
-func (tx *Tx) getNode(ctx context.Context, ino INode) (wfscnp.Node, error) {
-	if tx.inodeCache != nil {
-		if cached, exists := tx.inodeCache[ino]; exists {
-			return cached, nil
-		}
+func newMachines(fp FSParams) *machines {
+	const (
+		filedata  = "filedata"
+		inodekv   = "inodekv"
+		xattrkv   = "xattrkv"
+		sessionkv = "sessionkv"
+		lockkv    = "lockkv"
+	)
+	var dataSalt [32]byte
+	gdat.DeriveKey(dataSalt[:], &fp.Salt, []byte(filedata))
+	var inokvSalt [32]byte
+	gdat.DeriveKey(inokvSalt[:], &fp.Salt, []byte(inodekv))
+	var xattrkvSalt [32]byte
+	gdat.DeriveKey(xattrkvSalt[:], &fp.Salt, []byte(xattrkv))
+	var sessionkvSalt [32]byte
+	gdat.DeriveKey(sessionkvSalt[:], &fp.Salt, []byte(sessionkv))
+	var lockkvSalt [32]byte
+	gdat.DeriveKey(lockkvSalt[:], &fp.Salt, []byte(lockkv))
+	return &machines{
+		fdata: *gdat.NewMachine(gdat.Params{
+			Salt:          dataSalt,
+			KeyedHashFunc: fp.HashAlgo.KeyedHash,
+		}),
+		inodekv: gotkv.NewMachine(gotkv.Params{
+			Salt:          inokvSalt,
+			MaxSize:       int(fp.MaxBlobSize),
+			MeanSize:      1 << 13,
+			KeyedHashFunc: fp.HashAlgo.KeyedHash,
+		}),
+		xattrkv: gotkv.NewMachine(gotkv.Params{
+			Salt:          xattrkvSalt,
+			MaxSize:       int(fp.MaxBlobSize),
+			MeanSize:      1 << 13,
+			KeyedHashFunc: fp.HashAlgo.KeyedHash,
+		}),
+		sessionkv: gotkv.NewMachine(gotkv.Params{
+			Salt:          sessionkvSalt,
+			MaxSize:       int(fp.MaxBlobSize),
+			MeanSize:      1 << 13,
+			KeyedHashFunc: fp.HashAlgo.KeyedHash,
+		}),
+		lockkv: gotkv.NewMachine(gotkv.Params{
+			Salt:          lockkvSalt,
+			MaxSize:       int(fp.MaxBlobSize),
+			MeanSize:      1 << 13,
+			KeyedHashFunc: fp.HashAlgo.KeyedHash,
+		}),
 	}
-
-	var val []byte
-	if exists, err := tx.inodetx.Get(ctx, ino[:], &val); err != nil {
-		return wfscnp.Node{}, err
-	} else if !exists {
-		return wfscnp.Node{}, fmt.Errorf("inode (%v) does not exist ", ino)
-	}
-	msg, err := capnp.Unmarshal(val)
-	if err != nil {
-		return wfscnp.Node{}, err
-	}
-	ret, err := wfscnp.ReadRootNode(msg)
-	if err != nil {
-		return wfscnp.Node{}, err
-	}
-	if tx.inodeCache == nil {
-		tx.inodeCache = make(map[INode]wfscnp.Node)
-	}
-	tx.inodeCache[ino] = ret
-	return ret, nil
-}
-
-func (tx *Tx) putNode(ctx context.Context, ino INode, node wfscnp.Node) error {
-	msg := node.Message()
-	if msg == nil {
-		return fmt.Errorf("cannot write invalid node for inode (%v)", ino)
-	}
-	data, err := msg.Marshal()
-	if err != nil {
-		return err
-	}
-	if err := tx.inodetx.Put(ctx, ino[:], data); err != nil {
-		return err
-	}
-	if tx.inodeCache == nil {
-		tx.inodeCache = make(map[INode]wfscnp.Node)
-	}
-	tx.inodeCache[ino] = node
-	return nil
-}
-
-func (tx *Tx) setRoot(ctx context.Context, node wfscnp.Node) error {
-	return tx.putNode(ctx, INode{}, node)
-}
-
-func (tx *Tx) StatINode(ctx context.Context, ino INode) (INodeStats, error) {
-	node, err := tx.getNode(ctx, ino)
-	if err != nil {
-		return INodeStats{}, err
-	}
-	return INodeStats{RefCount: node.RefCount()}, nil
-}
-
-func (tx *Tx) GetModifiedAt(ctx context.Context, ino INode) (tai64.TAI64N, error) {
-	node, err := tx.getNode(ctx, ino)
-	if err != nil {
-		return tai64.TAI64N{}, err
-	}
-	ts, err := node.ModifiedAt()
-	if err != nil {
-		return tai64.TAI64N{}, err
-	}
-	return tai64.TAI64N{Seconds: ts.Seconds(), Nanoseconds: ts.Nanoseconds()}, nil
-}
-
-func (tx *Tx) SetModifiedAt(ctx context.Context, ino INode, t tai64.TAI64N) error {
-	node, err := tx.getNode(ctx, ino)
-	if err != nil {
-		return err
-	}
-	mt, err := node.ModifiedAt()
-	if err != nil || !node.HasModifiedAt() {
-		mt, err = node.NewModifiedAt()
-		if err != nil {
-			return err
-		}
-	}
-	mt.SetSeconds(t.Seconds)
-	mt.SetNanoseconds(t.Nanoseconds)
-	return tx.putNode(ctx, ino, node)
 }

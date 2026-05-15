@@ -123,10 +123,10 @@ func nodeMode(node wfscnp.Node) fs.FileMode {
 func (tx *FSTx) GetMode(ctx context.Context, ino INode) (fs.FileMode, error) {
 	tx.mu.RLock()
 	defer tx.mu.RUnlock()
-	return tx.getModeLocked(ctx, ino)
+	return tx.getMode(ctx, ino)
 }
 
-func (tx *FSTx) getModeLocked(ctx context.Context, ino INode) (fs.FileMode, error) {
+func (tx *FSTx) getMode(ctx context.Context, ino INode) (fs.FileMode, error) {
 	node, err := tx.getNode(ctx, ino)
 	if err != nil {
 		return 0, err

@@ -49,10 +49,8 @@ struct Session {
     createAt @0: TAI64N;
     # ttl is the time to live in seconds.
     ttl @1: UInt32;
-    # publicKeyRef is a blobcache.CID pointing at a public key.
-    publicKeyRef @2: Ref;
-    touchedAt @3: TAI64N;
-    lockCount @4: UInt32;
+    touchedAt @2: TAI64N;
+    lockCount @3: UInt32;
 }
 
 struct LockState {

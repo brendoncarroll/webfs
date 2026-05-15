@@ -20,7 +20,8 @@ import (
 
 var sessionSigCtx = inet256.SigCtxString("webfs/session")
 
-func (tx *Tx) ensureSession(ctx context.Context, privateKey inet256.PrivateKey, now tai64.TAI64N) (inet256.ID, error) {
+// ensureSession assumes the lock is held
+func (tx *FSTx) ensureSession(ctx context.Context, privateKey inet256.PrivateKey, now tai64.TAI64N) (inet256.ID, error) {
 	if tx.pki == nil {
 		return inet256.ID{}, fmt.Errorf("tx has no pki")
 	}
@@ -36,21 +37,6 @@ func (tx *Tx) ensureSession(ctx context.Context, privateKey inet256.PrivateKey, 
 				return err
 			}
 			setCNPTime(createdAt, now)
-			publicKeyData, err := tx.pki.MarshalPublicKey(nil, publicKey)
-			if err != nil {
-				return err
-			}
-			publicKeyRef, err := tx.fdata.Post(ctx, tx.rws, publicKeyData)
-			if err != nil {
-				return err
-			}
-			ref, err := session.NewPublicKeyRef()
-			if err != nil {
-				return err
-			}
-			if err := setCNPRef(ref, publicKeyRef); err != nil {
-				return err
-			}
 		}
 		touchedAt, err := session.NewTouchedAt()
 		if err != nil {
@@ -62,7 +48,8 @@ func (tx *Tx) ensureSession(ctx context.Context, privateKey inet256.PrivateKey, 
 	return id, err
 }
 
-func (tx *Tx) dropSession(ctx context.Context, id inet256.ID) error {
+// dropSession assumes the lock is held
+func (tx *FSTx) dropSession(ctx context.Context, id inet256.ID) error {
 	session, err := tx.getSession(ctx, id)
 	if err != nil {
 		return err
@@ -75,9 +62,18 @@ func (tx *Tx) dropSession(ctx context.Context, id inet256.ID) error {
 	return tx.sessiontx.Delete(ctx, id[:])
 }
 
+func (tx *FSTx) SessionExists(ctx context.Context, id inet256.ID) (bool, error) {
+	tx.mu.RLock()
+	defer tx.mu.RUnlock()
+	var val []byte
+	return tx.sessiontx.Get(ctx, id[:], &val)
+}
+
 // GCSessions deletes sessions whose touchedAt + ttl has elapsed.
 // A ttl of zero is treated as no expiry.
-func (tx *Tx) GCSessions(ctx context.Context) error {
+func (tx *FSTx) GCSessions(ctx context.Context) error {
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
 	if _, err := tx.sessiontx.Flush(ctx); err != nil {
 		return err
 	}
@@ -93,7 +89,19 @@ func (tx *Tx) GCSessions(ctx context.Context) error {
 			return err
 		}
 		for i := 0; i < n; i++ {
-			session, err := tx.unmarshalSessionValue(buf[i].Key, buf[i].Value)
+			if len(buf[i].Key) != len(inet256.ID{}) {
+				return fmt.Errorf("invalid session key length: %d", len(buf[i].Key))
+			}
+			var sessionID inet256.ID
+			copy(sessionID[:], buf[i].Key)
+			sessionData, pubKey, err := openSigned(ctx, tx.pkcache, &sessionSigCtx, tx.ros, buf[i].Value)
+			if err != nil {
+				return err
+			}
+			if tx.pki.NewID(pubKey) != sessionID {
+				return fmt.Errorf("session %v has wrong public key", sessionID)
+			}
+			session, err := parseSession(sessionData)
 			if err != nil {
 				return err
 			}
@@ -110,7 +118,9 @@ func (tx *Tx) GCSessions(ctx context.Context) error {
 	}
 }
 
-func (tx *Tx) getSession(ctx context.Context, sessionID inet256.ID) (wfscnp.Session, error) {
+// getSession reads and validates a session
+// getSession assumes the lock is held
+func (tx *FSTx) getSession(ctx context.Context, sessionID inet256.ID) (wfscnp.Session, error) {
 	var value []byte
 	exists, err := tx.sessiontx.Get(ctx, sessionID[:], &value)
 	if err != nil {
@@ -119,25 +129,52 @@ func (tx *Tx) getSession(ctx context.Context, sessionID inet256.ID) (wfscnp.Sess
 	if !exists {
 		return wfscnp.Session{}, fs.ErrNotExist
 	}
-	return tx.unmarshalSessionValue(sessionID[:], value)
-}
-
-func (tx *Tx) editSession(ctx context.Context, sessionID inet256.ID, privateKey inet256.PrivateKey, fn func(wfscnp.Session) error) (wfscnp.Session, error) {
-	var prev wfscnp.Session
-	if session, err := tx.getSession(ctx, sessionID); err == nil {
-		prev = session
-	} else if !fsErrNotExist(err) {
-		return wfscnp.Session{}, err
-	}
-	_, seg := capnp.NewSingleSegmentMessage(nil)
-	session, err := wfscnp.NewRootSession(seg)
+	sessionData, pubKey, err := openSigned(ctx, tx.pkcache, &sessionSigCtx, tx.ros, value)
 	if err != nil {
 		return wfscnp.Session{}, err
 	}
-	if prev.IsValid() {
-		if err := copySession(session, prev); err != nil {
+	actualID := tx.pki.NewID(pubKey)
+	if actualID != sessionID {
+		return wfscnp.Session{}, fmt.Errorf("session has wrong public key")
+	}
+	return parseSession(sessionData)
+}
+
+func (tx *FSTx) putSession(ctx context.Context, privateKey inet256.PrivateKey, x wfscnp.Session) error {
+	sessionID := tx.pki.NewID(inet256.PublicFromPrivate(privateKey))
+	sessionData, err := x.Message().Marshal()
+	if err != nil {
+		return err
+	}
+	val, err := sealSigned(ctx, tx.pkcache, &sessionSigCtx, tx.rws, privateKey, sessionData, nil)
+	if err != nil {
+		return err
+	}
+	if err := tx.sessiontx.Put(ctx, sessionID[:], val); err != nil {
+		return err
+	}
+	return nil
+}
+
+// editSession assumes the lock is held
+func (tx *FSTx) editSession(ctx context.Context, sessionID inet256.ID, privateKey inet256.PrivateKey, fn func(wfscnp.Session) error) (wfscnp.Session, error) {
+	session, err := tx.getSession(ctx, sessionID)
+	if err != nil && !fsErrNotExist(err) {
+		return wfscnp.Session{}, err
+	}
+	missing := fsErrNotExist(err)
+	_, seg := capnp.NewSingleSegmentMessage(nil)
+	editable, err := wfscnp.NewRootSession(seg)
+	if err != nil {
+		return wfscnp.Session{}, err
+	}
+	if missing {
+		session = editable
+	} else {
+		if err := copySession(editable, session); err != nil {
 			return wfscnp.Session{}, err
 		}
+		session = editable
 	}
 	if err := fn(session); err != nil {
 		return wfscnp.Session{}, err
@@ -146,74 +183,67 @@ func (tx *Tx) editSession(ctx context.Context, sessionID inet256.ID, privateKey 
 	if err != nil {
 		return wfscnp.Session{}, err
 	}
-	sig := tx.pki.Sign(&sessionSigCtx, privateKey, sessionSigMessage(tx.gid, sessionData), nil)
-	if err := tx.sessiontx.Put(ctx, sessionID[:], makeSessionValue(nil, sessionData, sig)); err != nil {
+	val, err := sealSigned(ctx, tx.pkcache, &sessionSigCtx, tx.rws, privateKey, sessionData, nil)
+	if err != nil {
+		return wfscnp.Session{}, err
+	}
+	if err := tx.sessiontx.Put(ctx, sessionID[:], val); err != nil {
 		return wfscnp.Session{}, err
 	}
 	return session, nil
 }
 
-func (tx *Tx) editSessionByID(ctx context.Context, sessionID inet256.ID, fn func(wfscnp.Session) error) (wfscnp.Session, error) {
-	privateKey, err := tx.privateKeyForSession(ctx, sessionID)
+// incrementSessionLockCount
+// assumes lock is held
+func (tx *FSTx) incrementSessionLockCount(ctx context.Context, sessionID inet256.ID, delta int32) error {
+	privateKey, err := tx.getSessionPrivateKey(ctx, sessionID)
 	if err != nil {
-		return wfscnp.Session{}, err
+		return err
 	}
-	return tx.editSession(ctx, sessionID, privateKey, fn)
+	_, err = tx.editSession(ctx, sessionID, privateKey, func(session wfscnp.Session) error {
+		next := int64(session.LockCount()) + int64(delta)
+		if next < 0 {
+			return fmt.Errorf("session lock count underflow for %v", sessionID)
+		}
+		session.SetLockCount(uint32(next))
+		return nil
+	})
+	return err
 }
 
-func (tx *Tx) unmarshalSessionValue(key []byte, value []byte) (wfscnp.Session, error) {
-	sessionData, sig, err := parseSessionValue(value)
+func parseSession(data []byte) (wfscnp.Session, error) {
+	msg, err := capnp.Unmarshal(data)
 	if err != nil {
 		return wfscnp.Session{}, err
 	}
-	id := inet256.IDFromBytes(key)
-	publicKey, err := tx.sessionPublicKey(id, sessionData)
+	sess, err := wfscnp.ReadRootSession(msg)
 	if err != nil {
 		return wfscnp.Session{}, err
 	}
-	if !tx.pki.Verify(&sessionSigCtx, publicKey, sessionSigMessage(tx.gid, sessionData), sig) {
-		return wfscnp.Session{}, fmt.Errorf("invalid session signature for %v", id)
-	}
-	msg, err := capnp.Unmarshal(sessionData)
-	if err != nil {
-		return wfscnp.Session{}, err
-	}
-	return wfscnp.ReadRootSession(msg)
+	return sess, nil
 }
 
-func (tx *Tx) sessionPublicKey(id inet256.ID, sessionData []byte) (inet256.PublicKey, error) {
-	msg, err := capnp.Unmarshal(sessionData)
+// getSessionPublicKey retrieves the public key for a session.
+// it assumes the read lock is held
+func (tx *FSTx) getSessionPublicKey(ctx context.Context, id inet256.ID) (inet256.PublicKey, error) {
+	var value []byte
+	if ok, err := tx.sessiontx.Get(ctx, id[:], &value); err != nil {
+		return nil, err
+	} else if !ok {
+		return nil, fmt.Errorf("session not found")
+	}
+	refData, _, err := sbe.ReadN(value, gdat.RefSize)
 	if err != nil {
 		return nil, err
 	}
-	session, err := wfscnp.ReadRootSession(msg)
+	ref, err := gdat.ParseRef(refData)
 	if err != nil {
 		return nil, err
 	}
-	refCNP, err := session.PublicKeyRef()
-	if err != nil {
-		return nil, err
-	}
-	ref, err := cnpRefToGdatRef(refCNP)
-	if err != nil {
-		return nil, err
-	}
-	pubKeyData := make([]byte, tx.ros.MaxSize())
-	n, err := tx.fdata.Read(context.Background(), tx.ros, ref, pubKeyData)
-	if err != nil {
-		return nil, err
-	}
-	pubKey, err := tx.pki.ParsePublicKey(pubKeyData[:n])
-	if err != nil {
-		return nil, err
-	}
-	if tx.pki.NewID(pubKey) != id {
-		return nil, fmt.Errorf("session public key does not match id %v", id)
-	}
-	return pubKey, nil
+	return tx.pkcache.Get(ctx, tx.ros, ref)
 }
 
-func (tx *Tx) privateKeyForSession(ctx context.Context, sessionID inet256.ID) (inet256.PrivateKey, error) {
+func (tx *FSTx) getSessionPrivateKey(ctx context.Context, sessionID inet256.ID) (inet256.PrivateKey, error) {
 	if tx.priv == nil {
 		return nil, fmt.Errorf("tx has no private key")
 	}
@@ -221,44 +251,6 @@ func (tx *Tx) privateKeyForSession(ctx context.Context, sessionID inet256.ID) (i
 		return nil, fmt.Errorf("volume private key does not match session %v", sessionID)
 	}
 	return tx.priv, nil
-}
-
-func (tx *Tx) publicKeyFromSession(sessionID inet256.ID, session wfscnp.Session) (inet256.PublicKey, error) {
-	refCNP, err := session.PublicKeyRef()
-	if err != nil {
-		return nil, err
-	}
-	ref, err := cnpRefToGdatRef(refCNP)
-	if err != nil {
-		return nil, err
-	}
-	pubKeyData := make([]byte, tx.ros.MaxSize())
-	n, err := tx.fdata.Read(context.Background(), tx.ros, ref, pubKeyData)
-	if err != nil {
-		return nil, err
-	}
-	pubKey, err := tx.pki.ParsePublicKey(pubKeyData[:n])
-	if err != nil {
-		return nil, err
-	}
-	if tx.pki.NewID(pubKey) != sessionID {
-		return nil, fmt.Errorf("session public key does not match id %v", sessionID)
-	}
-	return pubKey, nil
-}
-
-func makeSessionValue(out []byte, sessionData []byte, sig []byte) []byte {
-	out = sbe.AppendLP32(out, sessionData)
-	out = append(out, sig...)
-	return out
-}
-
-func parseSessionValue(data []byte) (sessionData []byte, sig []byte, _ error) {
-	sessionData, sig, err := sbe.ReadLP32(data)
-	if err != nil {
-		return nil, nil, err
-	}
-	return sessionData, sig, nil
 }
 
 func sessionSigMessage(gid [32]byte, sessionData []byte) []byte {
@@ -302,17 +294,6 @@ func copySession(dst, src wfscnp.Session) error {
 	}
 	copyCNPTime(newCreateAt, createAt)
 	dst.SetTtl(src.Ttl())
-	publicKeyRef, err := src.PublicKeyRef()
-	if err != nil {
-		return err
-	}
-	newPublicKeyRef, err := dst.NewPublicKeyRef()
-	if err != nil {
-		return err
-	}
-	if err := copyCNPRef(newPublicKeyRef, publicKeyRef); err != nil {
-		return err
-	}
 	if src.HasTouchedAt() {
 		touchedAt, err := src.TouchedAt()
 		if err != nil {

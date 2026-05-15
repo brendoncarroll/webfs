@@ -20,7 +20,8 @@ type DirEnt struct {
 	Target INode
 }
 
-func (tx *Tx) getDir(ctx context.Context, ino INode) (wfscnp.Dir, error) {
+// getDir assumes the lock is held
+func (tx *FSTx) getDir(ctx context.Context, ino INode) (wfscnp.Dir, error) {
 	node, err := tx.getNode(ctx, ino)
 	if err != nil {
 		return wfscnp.Dir{}, err
@@ -32,18 +33,23 @@ func (tx *Tx) getDir(ctx context.Context, ino INode) (wfscnp.Dir, error) {
 }
 
 // CreateDirAt creates a new empty directory, and adds it to the parent.
-func (tx *Tx) CreateDirAt(ctx context.Context, parent INode, name string, mode fs.FileMode) (INode, error) {
+func (tx *FSTx) CreateDirAt(ctx context.Context, parent INode, name string, mode fs.FileMode) (INode, error) {
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
 	ino, err := tx.createDir(ctx, mode)
 	if err != nil {
 		return INode{}, err
 	}
-	if err := tx.Link(ctx, parent, name, ino); err != nil {
+	if err := tx.link(ctx, parent, name, ino); err != nil {
 		return INode{}, err
 	}
 	return ino, nil
 }
 
-func (tx *Tx) createDir(ctx context.Context, mode fs.FileMode) (INode, error) {
+// createDir creates a new dir and returns the INode to it.
+// createDir assumes a write lock.
+func (tx *FSTx) createDir(ctx context.Context, mode fs.FileMode) (INode, error) {
+	// assumes lock is held
 	now := tai64.Now()
 	_, seg := capnp.NewSingleSegmentMessage(nil)
 	node, err := wfscnp.NewRootNode(seg)
@@ -74,7 +80,13 @@ func (tx *Tx) createDir(ctx context.Context, mode fs.FileMode) (INode, error) {
 	return ino, nil
 }
 
-func (tx *Tx) Link(ctx context.Context, ino INode, name string, child INode) error {
+func (tx *FSTx) Link(ctx context.Context, ino INode, name string, child INode) error {
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
+	return tx.link(ctx, ino, name, child)
+}
+
+func (tx *FSTx) link(ctx context.Context, ino INode, name string, child INode) error {
 	if err := checkName(name); err != nil {
 		return err
 	}
@@ -85,7 +97,7 @@ func (tx *Tx) Link(ctx context.Context, ino INode, name string, child INode) err
 	if err != nil {
 		return err
 	}
-	if _, err := tx.GetChild(ctx, ino, name); err == nil {
+	if _, err := tx.getChild(ctx, ino, name); err == nil {
 		return fs.ErrExist
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return err
@@ -98,11 +110,13 @@ func (tx *Tx) Link(ctx context.Context, ino INode, name string, child INode) err
 	return tx.putNode(ctx, child, childNode)
 }
 
-func (tx *Tx) Unlink(ctx context.Context, ino INode, name string) error {
+func (tx *FSTx) Unlink(ctx context.Context, ino INode, name string) error {
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
 	if _, err := tx.getDir(ctx, ino); err != nil {
 		return err
 	}
-	ent, err := tx.GetChild(ctx, ino, name)
+	ent, err := tx.getChild(ctx, ino, name)
 	if err != nil {
 		return err
 	}
@@ -113,13 +127,15 @@ func (tx *Tx) Unlink(ctx context.Context, ino INode, name string) error {
 	return tx.decRef(ctx, ent.Target)
 }
 
-func (tx *Tx) Rename(ctx context.Context, oldParent INode, oldName string, newParent INode, newName string) error {
+func (tx *FSTx) Rename(ctx context.Context, oldParent INode, oldName string, newParent INode, newName string) error {
 	if err := checkName(oldName); err != nil {
 		return err
 	}
 	if err := checkName(newName); err != nil {
 		return err
 	}
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
 	if _, err := tx.getDir(ctx, oldParent); err != nil {
 		return err
 	}
@@ -130,14 +146,14 @@ func (tx *Tx) Rename(ctx context.Context, oldParent INode, oldName string, newPa
 		return nil
 	}
 
-	src, err := tx.GetChild(ctx, oldParent, oldName)
+	src, err := tx.getChild(ctx, oldParent, oldName)
 	if err != nil {
 		return err
 	}
 
 	var dst DirEnt
 	dstExists := false
-	if ent, err := tx.GetChild(ctx, newParent, newName); err == nil {
+	if ent, err := tx.getChild(ctx, newParent, newName); err == nil {
 		dst = ent
 		dstExists = true
 	} else if !errors.Is(err, fs.ErrNotExist) {
@@ -145,11 +161,11 @@ func (tx *Tx) Rename(ctx context.Context, oldParent INode, oldName string, newPa
 	}
 
 	if dstExists {
-		srcMode, err := tx.GetMode(ctx, src.Target)
+		srcMode, err := tx.getModeLocked(ctx, src.Target)
 		if err != nil {
 			return err
 		}
-		dstMode, err := tx.GetMode(ctx, dst.Target)
+		dstMode, err := tx.getModeLocked(ctx, dst.Target)
 		if err != nil {
 			return err
 		}
@@ -160,10 +176,17 @@ func (tx *Tx) Rename(ctx context.Context, oldParent INode, oldName string, newPa
 			return fs.ErrInvalid
 		}
 		if dstMode.IsDir() {
-			for _, err := range tx.ReadDir(ctx, dst.Target, "") {
-				if err != nil {
-					return err
-				}
+			// dst is a directory, check if it is notEmpty.
+			// flushing requires the write lock
+			if _, err := tx.inodetx.Flush(ctx); err != nil {
+				return err
+			}
+			it := tx.inodetx.Iterate(ctx, gotkv.PrefixSpan(dst.Target[:]))
+			_, err := streams.Next(ctx, it)
+			if err != nil && !streams.IsEOS(err) {
+				return err
+			} else if err == nil {
+				// dst is non-empty
 				return fs.ErrExist
 			}
 		}
@@ -183,7 +206,9 @@ func (tx *Tx) Rename(ctx context.Context, oldParent INode, oldName string, newPa
 	return nil
 }
 
-func (tx *Tx) decRef(ctx context.Context, ino INode) error {
+// decRef assumes the lock is held
+func (tx *FSTx) decRef(ctx context.Context, ino INode) error {
+	// assumes lock is held
 	childNode, err := tx.getNode(ctx, ino)
 	if err != nil {
 		return err
@@ -224,7 +249,19 @@ func (tx *Tx) decRef(ctx context.Context, ino INode) error {
 	return nil
 }
 
-func (tx *Tx) ReadDir(ctx context.Context, ino INode, gteq string) iter.Seq2[DirEnt, error] {
+func (tx *FSTx) ReadDir(ctx context.Context, ino INode, gteq string) iter.Seq2[DirEnt, error] {
+	return func(yield func(DirEnt, error) bool) {
+		tx.mu.Lock()
+		defer tx.mu.Unlock()
+		for ent, err := range tx.readDirLocked(ctx, ino, gteq) {
+			if !yield(ent, err) {
+				return
+			}
+		}
+	}
+}
+
+func (tx *FSTx) readDirLocked(ctx context.Context, ino INode, gteq string) iter.Seq2[DirEnt, error] {
 	return func(yield func(DirEnt, error) bool) {
 		if _, err := tx.getDir(ctx, ino); err != nil {
 			yield(DirEnt{}, err)
@@ -270,7 +307,14 @@ func (tx *Tx) ReadDir(ctx context.Context, ino INode, gteq string) iter.Seq2[Dir
 
 // GetChild looks for an entry in the directory at ino with name and returns it.
 // If it does not exist than an ErrNotExist is returned
-func (tx *Tx) GetChild(ctx context.Context, ino INode, name string) (DirEnt, error) {
+func (tx *FSTx) GetChild(ctx context.Context, ino INode, name string) (DirEnt, error) {
+	tx.mu.RLock()
+	defer tx.mu.RUnlock()
+	return tx.getChild(ctx, ino, name)
+}
+
+// getChild assumes the lock is held.
+func (tx *FSTx) getChild(ctx context.Context, ino INode, name string) (DirEnt, error) {
 	if _, err := tx.getDir(ctx, ino); err != nil {
 		return DirEnt{}, err
 	}

@@ -8,11 +8,12 @@ require (
 	github.com/cloudflare/circl v1.6.1
 	github.com/gotvc/got v0.4.1-0.20260514135151-658fded0a865
 	github.com/hanwen/go-fuse/v2 v2.8.0
+	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/stretchr/testify v1.11.1
 	go.brendoncarroll.net/exp v0.0.0-20260502194125-44f3dd6ca513
 	go.brendoncarroll.net/star v0.0.0-20260504181633-9736e9cb9450
 	go.brendoncarroll.net/tai64 v0.0.0-20241118171318-6e12d283d5e4
-	go.inet256.org/inet256 v0.0.8
+	go.inet256.org/inet256 v0.0.9-0.20260515191758-f465b29c8f1f
 	golang.org/x/sync v0.19.0
 	golang.org/x/sys v0.42.0
 )
@@ -44,7 +45,6 @@ require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/hashicorp/golang-lru v1.0.2 // indirect
-	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/klauspost/compress v1.16.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.5 // indirect
 	github.com/kr/pretty v0.3.1 // indirect

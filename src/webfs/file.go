@@ -11,13 +11,40 @@ import (
 	"github.com/brendoncarroll/webfs/src/internal/wfscnp"
 	"github.com/gotvc/got/src/gdat"
 	"github.com/gotvc/got/src/gotkv"
+	"go.brendoncarroll.net/exp/sbe"
 	"go.brendoncarroll.net/exp/streams"
 	"go.brendoncarroll.net/tai64"
 )
 
 type FileInfo struct {
-	Size      uint64
-	BlockSize uint32
+	Size uint64
+}
+
+type Extent struct {
+	Ref gdat.Ref
+	Len uint32
+}
+
+func (ext Extent) Marshal(out []byte) []byte {
+	out = append(out, ext.Ref.Marshal()...)
+	out = sbe.AppendUint32(out, ext.Len)
+	return out
+}
+
+func (ext *Extent) Unmarshal(data []byte) error {
+	refData, data, err := sbe.ReadN(data, gdat.RefSize)
+	if err != nil {
+		return err
+	}
+	if err := ext.Ref.Unmarshal(refData); err != nil {
+		return err
+	}
+	l, _, err := sbe.ReadUint32(data)
+	if err != nil {
+		return err
+	}
+	ext.Len = l
+	return nil
 }
 
 type FileParams struct {
@@ -94,7 +121,7 @@ func (tx *FSTx) getFile(ctx context.Context, ino INode) (wfscnp.File, wfscnp.Nod
 	return file, node, nil
 }
 
-// getFile acquires the lock and then calls getFileLocked
+// lockAndGetFile acquires the lock and then calls getFileLocked
 func (tx *FSTx) lockAndGetFile(ctx context.Context, ino INode) (wfscnp.File, wfscnp.Node, error) {
 	tx.mu.RLock()
 	defer tx.mu.RUnlock()
@@ -157,7 +184,7 @@ func (tx *FSTx) StatFile(ctx context.Context, ino INode) (FileInfo, error) {
 	if err != nil {
 		return FileInfo{}, err
 	}
-	return FileInfo{Size: file.Size(), BlockSize: file.BlockSize()}, nil
+	return FileInfo{Size: file.Size()}, nil
 }
 
 func (tx *FSTx) Truncate(ctx context.Context, ino INode, size uint64) error {
@@ -198,78 +225,113 @@ func (tx *FSTx) Truncate(ctx context.Context, ino INode, size uint64) error {
 	return tx.putNode(ctx, ino, node)
 }
 
-// WriteBlock writes buf, whos length must match the file's block size to the file.
-// Writing an all zero block deletes the entry for the block.
-func (tx *FSTx) WriteBlock(ctx context.Context, ino INode, blockno uint64, buf []byte) error {
-	file, _, err := tx.lockAndGetFile(ctx, ino)
-	if err != nil {
-		return err
-	}
-	blockSize := file.BlockSize()
-
-	if int(blockSize) != len(buf) {
-		return fmt.Errorf("buffer length is different from block size HAVE: %d WANT: %d", len(buf), blockSize)
-	}
-	return tx.writeBlock(ctx, ino, blockno, buf)
+func extKey(ino INode, endAt uint64) [16 + 8]byte {
+	var k [16 + 8]byte
+	copy(k[:16], ino[:])
+	binary.BigEndian.PutUint64(k[16:], endAt)
+	return k
 }
 
-func (tx *FSTx) writeBlock(ctx context.Context, ino INode, blockno uint64, buf []byte) error {
-	key := makeBlockKey(nil, ino, blockno)
-	if isAllZero(buf) {
-		tx.mu.Lock()
-		defer tx.mu.Unlock()
-		return tx.inodetx.Delete(ctx, key)
-	}
-	ref, err := tx.fdata.Post(ctx, tx.rws, buf)
-	if err != nil {
-		return err
-	}
-	tx.mu.Lock()
-	defer tx.mu.Unlock()
-	return tx.inodetx.Put(ctx, key, ref.Marshal())
+// putExtent inserts/updates an Extent ending at endAt
+// putExtent assumes the write lock is held.
+func (tx *FSTx) putExtent(ctx context.Context, ino INode, endAt uint64, ext Extent) error {
+	k := extKey(ino, endAt)
+	v := ext.Marshal(nil)
+	return tx.inodetx.Put(ctx, k[:], v)
 }
 
-// ReadBlock reads the blockno into buf.  If buf is short, data is written until buf is full, then nil is returned.
-// If there is no block
-func (tx *FSTx) ReadBlock(ctx context.Context, ino INode, blockno uint64, buf []byte) error {
-	file, _, err := tx.lockAndGetFile(ctx, ino)
-	if err != nil {
-		return err
+// getExtent retreives an extent from
+// getExtent assumes a lock is held.
+func (tx *FSTx) getExtent(ctx context.Context, ino INode, endAt uint64) (Extent, error) {
+	k := extKey(ino, endAt)
+	var val []byte
+	if exists, err := tx.inodetx.Get(ctx, k[:], &val); err != nil {
+		return Extent{}, err
+	} else if !exists {
+		return Extent{}, fmt.Errorf("extent not found")
 	}
-	return tx.readBlock(ctx, ino, blockno, file.BlockSize(), buf)
+	var ext Extent
+	return ext, ext.Unmarshal(val)
 }
 
-// readBlock assumes that ino refers to a valid file node in this transaction
-func (tx *FSTx) readBlock(ctx context.Context, ino INode, blockno uint64, blockSize uint32, buf []byte) error {
-	key := makeBlockKey(nil, ino, blockno)
-	var refData []byte
-	exists, err := func() (bool, error) {
-		tx.mu.RLock()
-		defer tx.mu.RUnlock()
-		return tx.inodetx.Get(ctx, key, &refData)
-	}()
-	if err != nil {
-		return err
-	}
-	if !exists {
-		clear(buf)
+// writeExtent assumes the write lock is held.
+func (tx *FSTx) writeExtent(ctx context.Context, ino INode, endAt uint64, data []byte) error {
+	if len(data) == 0 || isAllZero(data) {
 		return nil
 	}
-	var ref gdat.Ref
-	if err := ref.Unmarshal(refData); err != nil {
-		return err
+	if uint64(len(data)) > endAt {
+		return fmt.Errorf("extent length %d exceeds end offset %d", len(data), endAt)
 	}
-	readBuf := buf
-	if int(blockSize) > len(readBuf) {
-		readBuf = make([]byte, blockSize)
+	if uint64(len(data)) > uint64(^uint32(0)) {
+		return fmt.Errorf("extent length %d exceeds max length %d", len(data), uint64(^uint32(0)))
 	}
-	n, err := tx.fdata.Read(ctx, tx.ros, ref, readBuf)
+	ref, err := tx.fdata.Post(ctx, tx.rws, data)
 	if err != nil {
 		return err
 	}
-	clear(readBuf[n:])
-	if len(readBuf) != len(buf) {
-		copy(buf, readBuf[:len(buf)])
+	return tx.putExtent(ctx, ino, endAt, Extent{Ref: ref, Len: uint32(len(data))})
+}
+
+// readExtent call fn with data from the extent
+// readExtent can be called without the read lock
+func (tx *FSTx) readExtent(ctx context.Context, ext Extent, fn func([]byte) error) error {
+	return tx.fdata.GetF(ctx, tx.ros, ext.Ref, fn)
+}
+
+// getOverlappingExtents assumes the lock is held. If pending inode edits exist,
+// it flushes them so the range scan sees the current transaction state.
+func (tx *FSTx) getOverlappingExtents(ctx context.Context, ino INode, start, end uint64) ([]extentEntry, error) {
+	if start >= end {
+		return nil, nil
+	}
+	if tx.inodetx.Queued() > 0 {
+		if _, err := tx.inodetx.Flush(ctx); err != nil {
+			return nil, err
+		}
+	}
+	begin := extKey(ino, start+1)
+	it := tx.inodetx.IterateFlushed(ctx, gotkv.Span{Begin: begin[:], End: gotkv.PrefixEnd(ino[:])})
+	buf := make([]gotkv.Entry, 32)
+	var ret []extentEntry
+	for {
+		n, err := it.Next(ctx, buf)
+		if err != nil {
+			if streams.IsEOS(err) {
+				return ret, nil
+			}
+			return nil, err
+		}
+		for i := 0; i < n; i++ {
+			ee, err := parseExtentEntry(buf[i])
+			if err != nil {
+				return nil, err
+			}
+			extStart := ee.startAt()
+			if extStart >= end {
+				continue
+			}
+			ret = append(ret, ee)
+		}
+	}
+}
+
+// writeExtents writes data across as many extents as needed.
+func (tx *FSTx) writeExtents(ctx context.Context, ino INode, start uint64, data []byte) error {
+	maxChunk := tx.rws.MaxSize()
+	if maxChunk <= 0 {
+		return fmt.Errorf("invalid max blob size %d", maxChunk)
+	}
+	if uint64(maxChunk) > uint64(^uint32(0)) {
+		maxChunk = int(^uint32(0))
+	}
+	for len(data) > 0 {
+		n := min(len(data), maxChunk)
+		end := start + uint64(n)
+		if err := tx.writeExtent(ctx, ino, end, data[:n]); err != nil {
+			return err
+		}
+		start = end
+		data = data[n:]
 	}
 	return nil
 }
@@ -282,44 +344,52 @@ func (tx *FSTx) WriteAt(ctx context.Context, ino INode, offset int64, buf []byte
 	if len(buf) == 0 {
 		return nil
 	}
-
-	file, _, err := tx.lockAndGetFile(ctx, ino)
-	if err != nil {
-		return err
+	start := uint64(offset)
+	if start > ^uint64(0)-uint64(len(buf)) {
+		return fmt.Errorf("write range overflows uint64")
 	}
-	blockSize := int64(file.BlockSize())
-	if blockSize <= 0 {
-		return fmt.Errorf("inode %v has invalid block size %d", ino, blockSize)
-	}
-
-	remaining := buf
-	curOff := offset
-	for len(remaining) > 0 {
-		blockNo := uint64(curOff / blockSize)
-		blockOff := int(curOff % blockSize)
-		toWrite := min(len(remaining), int(blockSize)-blockOff)
-		if blockOff == 0 && toWrite == int(blockSize) {
-			if err := tx.writeBlock(ctx, ino, blockNo, remaining[:toWrite]); err != nil {
-				return err
-			}
-		} else {
-			fullBlock := make([]byte, int(blockSize))
-			if err := tx.readBlock(ctx, ino, blockNo, uint32(blockSize), fullBlock); err != nil {
-				return err
-			}
-			copy(fullBlock[blockOff:blockOff+toWrite], remaining[:toWrite])
-			if err := tx.writeBlock(ctx, ino, blockNo, fullBlock); err != nil {
-				return err
-			}
-		}
-		remaining = remaining[toWrite:]
-		curOff += int64(toWrite)
-	}
-	end := uint64(offset) + uint64(len(buf))
+	end := start + uint64(len(buf))
 
 	tx.mu.Lock()
 	defer tx.mu.Unlock()
-	// re-read file size under lock to be sure
+	if _, _, err := tx.getFile(ctx, ino); err != nil {
+		return err
+	}
+	overlaps, err := tx.getOverlappingExtents(ctx, ino, start, end)
+	if err != nil {
+		return err
+	}
+	for _, ee := range overlaps {
+		extStart := ee.startAt()
+		var data []byte
+		if err := tx.readExtent(ctx, ee.Ext, func(x []byte) error {
+			if len(x) < int(ee.Ext.Len) {
+				return fmt.Errorf("extent data is shorter than declared length: %d < %d", len(x), ee.Ext.Len)
+			}
+			data = append(data, x[:ee.Ext.Len]...)
+			return nil
+		}); err != nil {
+			return err
+		}
+		key := extKey(ino, ee.EndAt)
+		if err := tx.inodetx.Delete(ctx, key[:]); err != nil {
+			return err
+		}
+		if extStart < start {
+			if err := tx.writeExtents(ctx, ino, extStart, data[:start-extStart]); err != nil {
+				return err
+			}
+		}
+		if ee.EndAt > end {
+			if err := tx.writeExtents(ctx, ino, end, data[end-extStart:]); err != nil {
+				return err
+			}
+		}
+	}
+	if err := tx.writeExtents(ctx, ino, start, buf); err != nil {
+		return err
+	}
+
 	file, node, err := tx.getFile(ctx, ino)
 	if err != nil {
 		return err
@@ -341,41 +411,47 @@ func (tx *FSTx) ReadAt(ctx context.Context, ino INode, offset int64, buf []byte)
 		return 0, nil
 	}
 
-	file, _, err := tx.lockAndGetFile(ctx, ino)
-	if err != nil {
+	var (
+		overlaps   []extentEntry
+		toRead     int64
+		start, end uint64
+	)
+	if err := func() error {
+		tx.mu.RLock()
+		defer tx.mu.RUnlock()
+		file, _, err := tx.getFile(ctx, ino)
+		if err != nil {
+			return err
+		}
+		if uint64(offset) >= file.Size() {
+			return io.EOF
+		}
+		toRead = min(int64(len(buf)), int64(file.Size()-uint64(offset)))
+		start = uint64(offset)
+		end = start + uint64(toRead)
+		overlaps, err = tx.getOverlappingExtents(ctx, ino, start, end)
+		if err != nil {
+			return err
+		}
+		return nil
+	}(); err != nil {
 		return 0, err
 	}
-
-	if uint64(offset) >= file.Size() {
-		return 0, io.EOF
-	}
-	blockSize := int64(file.BlockSize())
-	if blockSize <= 0 {
-		return 0, fmt.Errorf("inode %v has invalid block size %d", ino, blockSize)
-	}
-	toRead := min(int64(len(buf)), int64(file.Size()-uint64(offset)))
-
-	remaining := int(toRead)
-	read := 0
-	curOff := offset
-	for remaining > 0 {
-		blockNo := uint64(curOff / blockSize)
-		blockOff := int(curOff % blockSize)
-		take := min(remaining, int(blockSize)-blockOff)
-		if blockOff == 0 {
-			if err := tx.readBlock(ctx, ino, blockNo, uint32(blockSize), buf[read:read+take]); err != nil {
-				return read, err
+	read := int(toRead)
+	clear(buf[:read])
+	for _, ee := range overlaps {
+		extStart := ee.startAt()
+		if err := tx.readExtent(ctx, ee.Ext, func(data []byte) error {
+			if len(data) < int(ee.Ext.Len) {
+				return fmt.Errorf("extent data is shorter than declared length: %d < %d", len(data), ee.Ext.Len)
 			}
-		} else {
-			fullBlock := make([]byte, int(blockSize))
-			if err := tx.readBlock(ctx, ino, blockNo, uint32(blockSize), fullBlock); err != nil {
-				return read, err
-			}
-			copy(buf[read:read+take], fullBlock[blockOff:blockOff+take])
+			copyStart := max(start, extStart)
+			copyEnd := min(end, ee.EndAt)
+			copy(buf[copyStart-start:copyEnd-start], data[copyStart-extStart:copyEnd-extStart])
+			return nil
+		}); err != nil {
+			return 0, err
 		}
-		read += take
-		remaining -= take
-		curOff += int64(take)
 	}
 	if read < len(buf) {
 		if read == 0 {
@@ -386,10 +462,35 @@ func (tx *FSTx) ReadAt(ctx context.Context, ino INode, offset int64, buf []byte)
 	return read, nil
 }
 
-func makeBlockKey(key []byte, ino INode, blockno uint64) []byte {
-	key = append(key, ino[:]...)
-	key = binary.BigEndian.AppendUint64(key, blockno)
-	return key
+type extentEntry struct {
+	EndAt uint64
+	Ext   Extent
+}
+
+func (ee *extentEntry) Unmarshal(ent gotkv.Entry) error {
+	if len(ent.Key) != len(INode{})+8 {
+		return fmt.Errorf("invalid extent key length: %d", len(ent.Key))
+	}
+	ee.EndAt = binary.BigEndian.Uint64(ent.Key[len(INode{}):])
+	if err := ee.Ext.Unmarshal(ent.Value); err != nil {
+		return err
+	}
+	if uint64(ee.Ext.Len) > ee.EndAt {
+		return fmt.Errorf("invalid extent ending at %d with length %d", ee.EndAt, ee.Ext.Len)
+	}
+	return nil
+}
+
+func parseExtentEntry(ent gotkv.Entry) (extentEntry, error) {
+	var ee extentEntry
+	if err := ee.Unmarshal(ent); err != nil {
+		return extentEntry{}, err
+	}
+	return ee, nil
+}
+
+func (ee extentEntry) startAt() uint64 {
+	return ee.EndAt - uint64(ee.Ext.Len)
 }
 
 func isAllZero(x []byte) bool {

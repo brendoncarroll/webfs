@@ -43,6 +43,41 @@ func TestFile(t *testing.T) {
 	}))
 }
 
+func TestFileExtents(t *testing.T) {
+	ctx := context.Background()
+	sys, vcfg := setupVol(t)
+	var fileIno INode
+
+	want := make([]byte, 23)
+	copy(want, []byte("hello WEBld"))
+	copy(want[20:], []byte("end"))
+	copy(want[3:], []byte{0, 0, 0, 0})
+
+	require.NoError(t, modify(t, sys, ctx, vcfg, func(tx *Tx) error {
+		ino, err := tx.CreateFileAt(ctx, rootINode(), "a", 0o644, FileParams{
+			Now:       tai64.Now(),
+			BlockSize: 4096,
+		})
+		if err != nil {
+			return err
+		}
+		fileIno = ino
+		require.NoError(t, tx.WriteAt(ctx, fileIno, 0, []byte("hello world")))
+		require.NoError(t, tx.WriteAt(ctx, fileIno, 6, []byte("WEB")))
+		require.NoError(t, tx.WriteAt(ctx, fileIno, 20, []byte("end")))
+		require.NoError(t, tx.WriteAt(ctx, fileIno, 3, []byte{0, 0, 0, 0}))
+		return nil
+	}))
+	require.NoError(t, view(t, sys, ctx, vcfg, func(tx *Tx) error {
+		buf := make([]byte, len(want))
+		n, err := tx.ReadAt(ctx, fileIno, 0, buf)
+		require.NoError(t, err)
+		require.Equal(t, len(want), n)
+		require.Equal(t, want, buf)
+		return nil
+	}))
+}
+
 func TestDir(t *testing.T) {
 	ctx := context.Background()
 	sys, vcfg := setupVol(t)

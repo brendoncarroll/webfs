@@ -114,7 +114,7 @@ func (tx *FSTx) getLock(ctx context.Context, ino INode, sessionID inet256.ID, ow
 	if err != nil {
 		return wfscnp.LockState{}, err
 	}
-	if tx.pki.NewID(pubKey) != sessionID {
+	if tx.sys.pki.NewID(pubKey) != sessionID {
 		return wfscnp.LockState{}, fmt.Errorf("lock has wrong signer for session %v", sessionID)
 	}
 	return parseLock(lockData)

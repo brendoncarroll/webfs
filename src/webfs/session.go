@@ -22,14 +22,11 @@ var sessionSigCtx = inet256.SigCtxString("webfs/session")
 
 // ensureSession assumes the lock is held
 func (tx *FSTx) ensureSession(ctx context.Context, privateKey inet256.PrivateKey, now tai64.TAI64N) (inet256.ID, error) {
-	if tx.pki == nil {
-		return inet256.ID{}, fmt.Errorf("tx has no pki")
-	}
 	if tx.gid != tx.prev.gid {
 		return inet256.ID{}, fmt.Errorf("tx gid does not match state gid")
 	}
 	publicKey := inet256.PublicFromPrivate(privateKey)
-	id := tx.pki.NewID(publicKey)
+	id := tx.sys.pki.NewID(publicKey)
 	_, err := tx.editSession(ctx, id, privateKey, func(session wfscnp.Session) error {
 		if !session.HasCreateAt() {
 			createdAt, err := session.NewCreateAt()
@@ -98,7 +95,7 @@ func (tx *FSTx) GCSessions(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			if tx.pki.NewID(pubKey) != sessionID {
+			if tx.sys.pki.NewID(pubKey) != sessionID {
 				return fmt.Errorf("session %v has wrong public key", sessionID)
 			}
 			session, err := parseSession(sessionData)
@@ -133,7 +130,7 @@ func (tx *FSTx) getSession(ctx context.Context, sessionID inet256.ID) (wfscnp.Se
 	if err != nil {
 		return wfscnp.Session{}, err
 	}
-	actualID := tx.pki.NewID(pubKey)
+	actualID := tx.sys.pki.NewID(pubKey)
 	if actualID != sessionID {
 		return wfscnp.Session{}, fmt.Errorf("session has wrong public key")
 	}
@@ -141,7 +138,7 @@ func (tx *FSTx) getSession(ctx context.Context, sessionID inet256.ID) (wfscnp.Se
 }
 
 func (tx *FSTx) putSession(ctx context.Context, privateKey inet256.PrivateKey, x wfscnp.Session) error {
-	sessionID := tx.pki.NewID(inet256.PublicFromPrivate(privateKey))
+	sessionID := tx.sys.pki.NewID(inet256.PublicFromPrivate(privateKey))
 	sessionData, err := x.Message().Marshal()
 	if err != nil {
 		return err
@@ -247,7 +244,7 @@ func (tx *FSTx) getSessionPrivateKey(ctx context.Context, sessionID inet256.ID) 
 	if tx.priv == nil {
 		return nil, fmt.Errorf("tx has no private key")
 	}
-	if tx.pki.NewID(inet256.PublicFromPrivate(tx.priv)) != sessionID {
+	if tx.sys.pki.NewID(inet256.PublicFromPrivate(tx.priv)) != sessionID {
 		return nil, fmt.Errorf("volume private key does not match session %v", sessionID)
 	}
 	return tx.priv, nil

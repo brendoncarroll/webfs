@@ -25,11 +25,12 @@ type Linker interface {
 type FSTx struct {
 	// prev is the previous existing state, without any pending changes
 	prev      FSState
+	sys       *System
+	vcfg      VolumeConfig
 	ros       bcsdk.RO
 	rws       bcsdk.RW
 	volLinker Linker
 	gid       GID
-	pki       *inet256.PKI
 	priv      inet256.PrivateKey
 	fdata     *gdat.Machine
 	pkcache   *gdatcache.Cache[inet256.PublicKey]
@@ -43,18 +44,27 @@ type FSTx struct {
 	inodeCache map[INode]wfscnp.Node
 }
 
-func newFSTx(prev FSState, s bcsdk.RW, link Linker, machs *machines, pki *inet256.PKI, priv inet256.PrivateKey) *FSTx {
+func (sys *System) newFSTx(vcfg VolumeConfig, prev FSState, s bcsdk.RW, link Linker) *FSTx {
+	_, priv := vcfg.DeriveSiging()
+	fsp := FSParams{
+		HashAlgo:    vcfg.HashAlgo,
+		GID:         prev.gid,
+		MaxBlobSize: prev.maxBlobSize,
+		Salt:        prev.salt,
+	}
+	machs := sys.getMachs(vcfg.FQOID(), fsp)
 	return &FSTx{
+		sys:       sys,
+		vcfg:      vcfg,
 		prev:      prev,
 		ros:       s,
 		rws:       s,
 		volLinker: link,
 		gid:       prev.gid,
-		pki:       pki,
 		priv:      priv,
 
 		fdata:     &machs.fdata,
-		pkcache:   newPublicKeyCache(&machs.fdata, pki, 16),
+		pkcache:   sys.getPKCache(vcfg.FQOID(), vcfg.HashAlgo),
 		inodetx:   machs.inodekv.NewTx(s, prev.inodes),
 		xattrtx:   machs.xattrkv.NewTx(s, prev.xattrs),
 		sessiontx: machs.sessionkv.NewTx(s, prev.sessions),

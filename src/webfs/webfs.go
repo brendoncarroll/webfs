@@ -19,6 +19,7 @@ import (
 	"github.com/gotvc/got/src/gotkv"
 	"go.brendoncarroll.net/exp/sbe"
 	"go.inet256.org/inet256/src/inet256"
+	"golang.org/x/crypto/chacha20poly1305"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -39,7 +40,8 @@ type VolumeConfig struct {
 }
 
 func (vc VolumeConfig) DeriveSiging() (sign.PublicKey, sign.PrivateKey) {
-	return mldsa87.NewKeyFromSeed((*[32]byte)(&vc.PrivateKeySeed))
+	seed := vc.HashAlgo.KeyedHash((*blobcache.CID)(&vc.PrivateKeySeed), []byte(MLDSA87))
+	return mldsa87.NewKeyFromSeed((*[32]byte)(&seed))
 }
 
 func (vc VolumeConfig) FQOID() blobcache.FQOID {
@@ -61,8 +63,9 @@ type System struct {
 	bc  blobcache.Service
 	pki inet256.PKI
 
-	mu    sync.Mutex
-	machs map[blobcache.FQOID]*machines
+	mu       sync.Mutex
+	machs    map[blobcache.FQOID]*machines
+	pkcaches map[blobcache.FQOID]*gdatcache.Cache[inet256.PublicKey]
 }
 
 func NewSystem(svc blobcache.Service, pki inet256.PKI) *System {
@@ -77,11 +80,9 @@ func (sys *System) PKI() inet256.PKI {
 }
 
 func (sys *System) GenerateConfig(fqoid blobcache.FQOID) VolumeConfig {
-	var asymSeed [32]byte
-	rand.Read(asymSeed[:])
-	// signing
-	mldsa87.NewKeyFromSeed(&asymSeed)
-
+	// private
+	var private [32]byte
+	rand.Read(private[:])
 	// aead
 	var aeadSecret [32]byte
 	rand.Read(aeadSecret[:])
@@ -96,7 +97,7 @@ func (sys *System) GenerateConfig(fqoid blobcache.FQOID) VolumeConfig {
 		HashAlgo:       hashAlgo,
 		GID:            gid,
 		DEK:            aeadSecret,
-		PrivateKeySeed: asymSeed,
+		PrivateKeySeed: private,
 		SignAlgo:       MLDSA87,
 	}
 }
@@ -131,7 +132,7 @@ func (sys *System) Initialize(ctx context.Context, volh blobcache.Handle, cfg Vo
 			return err
 		}
 		// setup root
-		tx2 := newFSTx(root, tx, tx, newMachines(fsp), &sys.pki, nil)
+		tx2 := sys.newFSTx(cfg, root, tx, tx)
 		_, seg := capnp.NewSingleSegmentMessage(nil)
 		node, err := wfscnp.NewRootNode(seg)
 		if err != nil {
@@ -146,7 +147,11 @@ func (sys *System) Initialize(ctx context.Context, volh blobcache.Handle, cfg Vo
 		if err != nil {
 			return err
 		}
-		if err := SaveState(ctx, tx, root); err != nil {
+		out, err := sys.sealFS(ctx, cfg, tx, root)
+		if err != nil {
+			return err
+		}
+		if err := tx.Save(ctx, out); err != nil {
 			return err
 		}
 		return tx.Commit(ctx)
@@ -232,12 +237,27 @@ func (sys *System) getMachs(fqoid blobcache.FQOID, fp FSParams) *machines {
 	return machs
 }
 
+func (sys *System) getPKCache(fqoid blobcache.FQOID, hashAlgo blobcache.HashAlgo) *gdatcache.Cache[inet256.PublicKey] {
+	sys.mu.Lock()
+	defer sys.mu.Unlock()
+	pkcache := sys.pkcaches[fqoid]
+	if pkcache == nil {
+		dmach := newDataMach([32]byte{}, hashAlgo)
+		pkcache = newPublicKeyCache(dmach, &sys.pki, 32)
+		if sys.pkcaches == nil {
+			sys.pkcaches = map[blobcache.FQOID]*PublicKeyCache{}
+		}
+		sys.pkcaches[fqoid] = pkcache
+	}
+	return pkcache
+}
+
 type INodeStats struct {
 	RefCount uint32
 }
 
-func deriveVolumePrivateKey(pki *inet256.PKI, vcfg VolumeConfig) inet256.PrivateKey {
-	_, priv := mldsa87.NewKeyFromSeed((*[32]byte)(&vcfg.PrivateKeySeed))
+func derivePrivateKey(pki *inet256.PKI, vcfg VolumeConfig) inet256.PrivateKey {
+	_, priv := vcfg.DeriveSiging()
 	return priv
 }
 
@@ -252,6 +272,13 @@ type machines struct {
 	sessionkv gotkv.Machine
 	// lockkv manages interactions with the locks table.
 	lockkv gotkv.Machine
+}
+
+func newDataMach(dataSalt [32]byte, hashAlgo blobcache.HashAlgo) *gdat.Machine {
+	return gdat.NewMachine(gdat.Params{
+		Salt:          dataSalt,
+		KeyedHashFunc: hashAlgo.KeyedHash,
+	})
 }
 
 func newMachines(fp FSParams) *machines {
@@ -273,10 +300,7 @@ func newMachines(fp FSParams) *machines {
 	var lockkvSalt [32]byte
 	gdat.DeriveKey(lockkvSalt[:], &fp.Salt, []byte(lockkv))
 	return &machines{
-		fdata: *gdat.NewMachine(gdat.Params{
-			Salt:          dataSalt,
-			KeyedHashFunc: fp.HashAlgo.KeyedHash,
-		}),
+		fdata: *newDataMach(dataSalt, fp.HashAlgo),
 		inodekv: gotkv.NewMachine(gotkv.Params{
 			Salt:          inokvSalt,
 			MaxSize:       int(fp.MaxBlobSize),
@@ -314,20 +338,17 @@ type Tx struct {
 }
 
 func (sys *System) beginTx(ctx context.Context, vcfg VolumeConfig, bctx *bcsdk.Tx) (*Tx, error) {
-	root, err := LoadState(ctx, bctx)
-	if err != nil {
+	var ctext []byte
+	if err := bctx.Load(ctx, &ctext); err != nil {
 		return nil, err
 	}
 	fqoid := blobcache.FQOID{OID: vcfg.VolumeID, Node: vcfg.NodeID}
-	fsp := FSParams{
-		HashAlgo:    vcfg.HashAlgo,
-		GID:         root.gid,
-		MaxBlobSize: root.maxBlobSize,
-		Salt:        root.salt,
+	pkcache := sys.getPKCache(fqoid, vcfg.HashAlgo)
+	fsstate, err := openFS(ctx, pkcache, vcfg, bctx, ctext)
+	if err != nil {
+		return nil, err
 	}
-	machs := sys.getMachs(fqoid, fsp)
-	privKey := deriveVolumePrivateKey(&sys.pki, vcfg)
-	fstx := newFSTx(root, bctx, bctx, machs, &sys.pki, privKey)
+	fstx := sys.newFSTx(vcfg, fsstate, bctx, bctx)
 	return &Tx{
 		bctx: bctx,
 		FSTx: *fstx,
@@ -340,7 +361,11 @@ func (tx *Tx) save(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return SaveState(ctx, tx.bctx, fsstate)
+	ctext, err := tx.sys.sealFS(ctx, tx.vcfg, tx.bctx, fsstate)
+	if err != nil {
+		return err
+	}
+	return tx.bctx.Save(ctx, ctext)
 }
 
 func (tx *Tx) Abort(ctx context.Context) error {
@@ -361,6 +386,56 @@ func (tx *Tx) Commit(ctx context.Context) error {
 	}
 	return tx.bctx.Commit(ctx)
 }
+
+var fsSigCtx = inet256.SigCtxString("webfs/fs")
+
+// sealFS takes an FS and signs and encrypts it.
+func (sys *System) sealFS(ctx context.Context, vcfg VolumeConfig, s bcsdk.WO, x FSState) ([]byte, error) {
+	_, priv := vcfg.DeriveSiging()
+	pkcache := sys.getPKCache(vcfg.FQOID(), vcfg.HashAlgo)
+	ptext, err := sealSigned(ctx, pkcache, &fsSigCtx, s, priv, x.Marshal(nil), nil)
+	if err != nil {
+		return nil, err
+	}
+	var nonce [chacha20poly1305.NonceSizeX]byte
+	aead, err := chacha20poly1305.NewX(vcfg.DEK[:])
+	if err != nil {
+		return nil, err
+	}
+	ctext := aead.Seal(nonce[:], nonce[:], ptext, nil)
+	return ctext, nil
+}
+
+func openFS(ctx context.Context, pkcache *PublicKeyCache, vcfg VolumeConfig, s bcsdk.RO, in []byte) (FSState, error) {
+	aead, err := chacha20poly1305.NewX(vcfg.DEK[:])
+	if err != nil {
+		return FSState{}, err
+	}
+	// get nonce from front
+	if len(in) < chacha20poly1305.NonceSizeX {
+		return FSState{}, fmt.Errorf("too short to contain nonce")
+	}
+	var nonce [chacha20poly1305.NonceSizeX]byte
+	copy(nonce[:], in[:])
+	ctext := in[chacha20poly1305.NonceSizeX:]
+
+	var ptext []byte
+	ptext, err = aead.Open(ptext, nonce[:], ctext, nil)
+	if err != nil {
+		return FSState{}, err
+	}
+	fsdata, _, err := openSigned(ctx, pkcache, &fsSigCtx, s, ptext)
+	if err != nil {
+		return FSState{}, err
+	}
+	var ret FSState
+	if err := ret.Unmarshal(fsdata); err != nil {
+		return FSState{}, err
+	}
+	return ret, nil
+}
+
+type PublicKeyCache = gdatcache.Cache[inet256.PublicKey]
 
 func newPublicKeyCache(mach *gdat.Machine, pki *inet256.PKI, size int) *gdatcache.Cache[inet256.PublicKey] {
 	marshal := func(x inet256.PublicKey, out []byte) []byte {

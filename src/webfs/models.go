@@ -1,14 +1,12 @@
 package webfs
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"time"
 
-	"blobcache.io/blobcache/src/bcsdk"
 	"github.com/gotvc/got/src/gotkv"
 	"go.brendoncarroll.net/exp/sbe"
 )
@@ -118,17 +116,4 @@ func readRoot(data []byte) (gotkv.Root, []byte, error) {
 		return gotkv.Root{}, nil, err
 	}
 	return root, rest, nil
-}
-
-func LoadState(ctx context.Context, ldr bcsdk.Loader) (FSState, error) {
-	var data []byte
-	if err := ldr.Load(ctx, &data); err != nil {
-		return FSState{}, err
-	}
-	var root FSState
-	return root, root.Unmarshal(data)
-}
-
-func SaveState(ctx context.Context, svr bcsdk.Saver, root FSState) error {
-	return svr.Save(ctx, root.Marshal(nil))
 }

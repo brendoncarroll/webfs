@@ -36,6 +36,8 @@ type FSState struct {
 	gid         GID
 	salt        [32]byte
 	inodes      gotkv.Root
+	exts        gotkv.Root
+	dirEnts     gotkv.Root
 	xattrs      gotkv.Root
 	sessions    gotkv.Root
 	locks       gotkv.Root
@@ -48,6 +50,8 @@ func (r FSState) Marshal(out []byte) []byte {
 	out = append(out, r.salt[:]...)
 
 	out = appendRoot(out, r.inodes)
+	out = appendRoot(out, r.exts)
+	out = appendRoot(out, r.dirEnts)
 	out = appendRoot(out, r.xattrs)
 	out = appendRoot(out, r.sessions)
 	out = appendRoot(out, r.locks)
@@ -81,6 +85,16 @@ func (r *FSState) Unmarshal(data []byte) error {
 		return err
 	}
 	r.inodes = inodes
+	exts, data, err := readRoot(data)
+	if err != nil {
+		return err
+	}
+	r.exts = exts
+	dirEnts, data, err := readRoot(data)
+	if err != nil {
+		return err
+	}
+	r.dirEnts = dirEnts
 	xattrs, data, err := readRoot(data)
 	if err != nil {
 		return err

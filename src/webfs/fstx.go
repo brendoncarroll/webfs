@@ -38,6 +38,8 @@ type FSTx struct {
 	// mu guards all the gotkvTx's
 	mu         sync.RWMutex
 	inodetx    *gotkv.Tx
+	exttx      *gotkv.Tx
+	dirEnttx   *gotkv.Tx
 	xattrtx    *gotkv.Tx
 	sessiontx  *gotkv.Tx
 	locktx     *gotkv.Tx
@@ -66,6 +68,8 @@ func (sys *System) newFSTx(vcfg VolumeConfig, prev FSState, s bcsdk.RW, link Lin
 		fdata:     &machs.fdata,
 		pkcache:   sys.getPKCache(vcfg.FQOID(), vcfg.HashAlgo),
 		inodetx:   machs.inodekv.NewTx(s, prev.inodes),
+		exttx:     machs.exts.NewTx(s, prev.exts),
+		dirEnttx:  machs.dirEnts.NewTx(s, prev.dirEnts),
 		xattrtx:   machs.xattrkv.NewTx(s, prev.xattrs),
 		sessiontx: machs.sessionkv.NewTx(s, prev.sessions),
 		locktx:    machs.lockkv.NewTx(s, prev.locks),
@@ -77,6 +81,14 @@ func (tx *FSTx) Flush(ctx context.Context) (FSState, error) {
 	tx.mu.Lock()
 	defer tx.mu.Unlock()
 	inodekvroot, err := tx.inodetx.Flush(ctx)
+	if err != nil {
+		return FSState{}, err
+	}
+	extsroot, err := tx.exttx.Flush(ctx)
+	if err != nil {
+		return FSState{}, err
+	}
+	dirEntsroot, err := tx.dirEnttx.Flush(ctx)
 	if err != nil {
 		return FSState{}, err
 	}
@@ -93,6 +105,8 @@ func (tx *FSTx) Flush(ctx context.Context) (FSState, error) {
 		return FSState{}, err
 	}
 	tx.prev.inodes = inodekvroot
+	tx.prev.exts = extsroot
+	tx.prev.dirEnts = dirEntsroot
 	tx.prev.xattrs = xattrkvroot
 	tx.prev.sessions = sessionkvroot
 	tx.prev.locks = lockkvroot

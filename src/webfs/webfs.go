@@ -206,6 +206,14 @@ func (sys *System) NewEmpty(ctx context.Context, txn *bcsdk.Tx, fp FSParams) (FS
 	if err != nil {
 		return FSState{}, err
 	}
+	extRoot, err := mach.exts.NewEmpty(ctx, txn)
+	if err != nil {
+		return FSState{}, err
+	}
+	dirEntRoot, err := mach.dirEnts.NewEmpty(ctx, txn)
+	if err != nil {
+		return FSState{}, err
+	}
 	xattrRoot, err := mach.xattrkv.NewEmpty(ctx, txn)
 	if err != nil {
 		return FSState{}, err
@@ -224,6 +232,8 @@ func (sys *System) NewEmpty(ctx context.Context, txn *bcsdk.Tx, fp FSParams) (FS
 		gid:         fp.GID,
 		salt:        fp.Salt,
 		inodes:      inodeRoot,
+		exts:        extRoot,
+		dirEnts:     dirEntRoot,
 		xattrs:      xattrRoot,
 		sessions:    sessionRoot,
 		locks:       lockRoot,
@@ -273,6 +283,10 @@ type machines struct {
 	fdata gdat.Machine
 	// inodekv manages interactions with the inode table.
 	inodekv gotkv.Machine
+	// exts manages interactions with the extents table.
+	exts gotkv.Machine
+	// dirEnts manages interactions with the dir entries table.
+	dirEnts gotkv.Machine
 	// xattrkv manages interactions with the xattrs table.
 	xattrkv gotkv.Machine
 	// sessionkv manages interactions with the sessions table.
@@ -292,6 +306,8 @@ func newMachines(fp FSParams) *machines {
 	const (
 		filedata  = "filedata"
 		inodekv   = "inodekv"
+		exts      = "exts"
+		dirEnts   = "dirEnts"
 		xattrkv   = "xattrkv"
 		sessionkv = "sessionkv"
 		lockkv    = "lockkv"
@@ -300,6 +316,10 @@ func newMachines(fp FSParams) *machines {
 	gdat.DeriveKey(dataSalt[:], &fp.Salt, []byte(filedata))
 	var inokvSalt [32]byte
 	gdat.DeriveKey(inokvSalt[:], &fp.Salt, []byte(inodekv))
+	var extsSalt [32]byte
+	gdat.DeriveKey(extsSalt[:], &fp.Salt, []byte(exts))
+	var dirEntsSalt [32]byte
+	gdat.DeriveKey(dirEntsSalt[:], &fp.Salt, []byte(dirEnts))
 	var xattrkvSalt [32]byte
 	gdat.DeriveKey(xattrkvSalt[:], &fp.Salt, []byte(xattrkv))
 	var sessionkvSalt [32]byte
@@ -310,6 +330,18 @@ func newMachines(fp FSParams) *machines {
 		fdata: *newDataMach(dataSalt, fp.HashAlgo),
 		inodekv: gotkv.NewMachine(gotkv.Params{
 			Salt:          inokvSalt,
+			MaxSize:       int(fp.MaxBlobSize),
+			MeanSize:      1 << 13,
+			KeyedHashFunc: fp.HashAlgo.KeyedHash,
+		}),
+		exts: gotkv.NewMachine(gotkv.Params{
+			Salt:          extsSalt,
+			MaxSize:       int(fp.MaxBlobSize),
+			MeanSize:      1 << 13,
+			KeyedHashFunc: fp.HashAlgo.KeyedHash,
+		}),
+		dirEnts: gotkv.NewMachine(gotkv.Params{
+			Salt:          dirEntsSalt,
 			MaxSize:       int(fp.MaxBlobSize),
 			MeanSize:      1 << 13,
 			KeyedHashFunc: fp.HashAlgo.KeyedHash,

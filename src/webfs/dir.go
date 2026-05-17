@@ -103,7 +103,7 @@ func (tx *FSTx) link(ctx context.Context, ino INode, name string, child INode) e
 		return err
 	}
 	key := makeDirEntKey(nil, ino, name)
-	if err := tx.inodetx.Put(ctx, key, child[:]); err != nil {
+	if err := tx.dirEnttx.Put(ctx, key, child[:]); err != nil {
 		return err
 	}
 	childNode.SetRefCount(childNode.RefCount() + 1)
@@ -121,7 +121,7 @@ func (tx *FSTx) Unlink(ctx context.Context, ino INode, name string) error {
 		return err
 	}
 	key := makeDirEntKey(nil, ino, name)
-	if err := tx.inodetx.Delete(ctx, key); err != nil {
+	if err := tx.dirEnttx.Delete(ctx, key); err != nil {
 		return err
 	}
 	return tx.decRef(ctx, ent.Target)
@@ -179,10 +179,10 @@ func (tx *FSTx) Rename(ctx context.Context, oldParent INode, oldName string, new
 
 	srcKey := makeDirEntKey(nil, oldParent, oldName)
 	dstKey := makeDirEntKey(nil, newParent, newName)
-	if err := tx.inodetx.Delete(ctx, srcKey); err != nil {
+	if err := tx.dirEnttx.Delete(ctx, srcKey); err != nil {
 		return err
 	}
-	if err := tx.inodetx.Put(ctx, dstKey, src.Target[:]); err != nil {
+	if err := tx.dirEnttx.Put(ctx, dstKey, src.Target[:]); err != nil {
 		return err
 	}
 	if dstExists {
@@ -206,24 +206,11 @@ func (tx *FSTx) decRef(ctx context.Context, ino INode) error {
 		childNode.SetRefCount(newRefCount)
 		return tx.putNode(ctx, ino, childNode)
 	}
-	if _, err := tx.inodetx.Flush(ctx); err != nil {
+	if err := tx.inodetx.Delete(ctx, ino[:]); err != nil {
 		return err
 	}
-	it := tx.inodetx.IterateFlushed(ctx, gotkv.PrefixSpan(ino[:]))
-	buf := make([]gotkv.Entry, 32)
-	for {
-		n, err := it.Next(ctx, buf)
-		if err != nil {
-			if streams.IsEOS(err) {
-				break
-			}
-			return err
-		}
-		for i := 0; i < n; i++ {
-			if err := tx.inodetx.Delete(ctx, buf[i].Key); err != nil {
-				return err
-			}
-		}
+	if err := tx.clearExtents(ctx, ino); err != nil {
+		return err
 	}
 	if err := tx.deleteXAttrs(ctx, ino); err != nil {
 		return err
@@ -242,13 +229,14 @@ func (tx *FSTx) ReadDir(ctx context.Context, ino INode, gteq string) iter.Seq2[D
 			yield(DirEnt{}, err)
 			return
 		}
-		if tx.inodetx.Queued() > 0 {
-			yield(DirEnt{}, fmt.Errorf("cannot readdir, inode table has pending writes"))
+		if tx.dirEnttx.Queued() > 0 {
+			yield(DirEnt{}, fmt.Errorf("cannot readdir, dir entry table has pending writes"))
+			return
 		}
 
 		begin := makeDirEntKey(nil, ino, gteq)
 		end := gotkv.PrefixEnd(ino[:])
-		it := tx.inodetx.IterateFlushed(ctx, gotkv.Span{Begin: begin, End: end})
+		it := tx.dirEnttx.IterateFlushed(ctx, gotkv.Span{Begin: begin, End: end})
 		buf := make([]gotkv.Entry, 32)
 		for {
 			n, err := it.Next(ctx, buf)
@@ -295,7 +283,7 @@ func (tx *FSTx) getChild(ctx context.Context, ino INode, name string) (DirEnt, e
 	}
 	key := makeDirEntKey(nil, ino, name)
 	var val []byte
-	exists, err := tx.inodetx.Get(ctx, key, &val)
+	exists, err := tx.dirEnttx.Get(ctx, key, &val)
 	if err != nil {
 		return DirEnt{}, err
 	}

@@ -198,27 +198,8 @@ func (tx *FSTx) Truncate(ctx context.Context, ino INode, size uint64) error {
 		return nil
 	}
 	if size == 0 {
-		if _, err := tx.inodetx.Flush(ctx); err != nil {
+		if err := tx.clearExtents(ctx, ino); err != nil {
 			return err
-		}
-		it := tx.inodetx.IterateFlushed(ctx, gotkv.PrefixSpan(ino[:]))
-		buf := make([]gotkv.Entry, 32)
-		for {
-			n, err := it.Next(ctx, buf)
-			if err != nil {
-				if streams.IsEOS(err) {
-					break
-				}
-				return err
-			}
-			for i := 0; i < n; i++ {
-				if len(buf[i].Key) != len(ino)+8 {
-					continue
-				}
-				if err := tx.inodetx.Delete(ctx, buf[i].Key); err != nil {
-					return err
-				}
-			}
 		}
 	}
 	file.SetSize(size)
@@ -237,7 +218,7 @@ func extKey(ino INode, endAt uint64) [16 + 8]byte {
 func (tx *FSTx) putExtent(ctx context.Context, ino INode, endAt uint64, ext Extent) error {
 	k := extKey(ino, endAt)
 	v := ext.Marshal(nil)
-	return tx.inodetx.Put(ctx, k[:], v)
+	return tx.exttx.Put(ctx, k[:], v)
 }
 
 // getExtent retreives an extent from
@@ -245,13 +226,44 @@ func (tx *FSTx) putExtent(ctx context.Context, ino INode, endAt uint64, ext Exte
 func (tx *FSTx) getExtent(ctx context.Context, ino INode, endAt uint64) (Extent, error) {
 	k := extKey(ino, endAt)
 	var val []byte
-	if exists, err := tx.inodetx.Get(ctx, k[:], &val); err != nil {
+	if exists, err := tx.exttx.Get(ctx, k[:], &val); err != nil {
 		return Extent{}, err
 	} else if !exists {
 		return Extent{}, fmt.Errorf("extent not found")
 	}
 	var ext Extent
 	return ext, ext.Unmarshal(val)
+}
+
+func (tx *FSTx) deleteExtent(ctx context.Context, ino INode, endAt uint64) error {
+	k := extKey(ino, endAt)
+	return tx.exttx.Delete(ctx, k[:])
+}
+
+// clearExtents removes all extents belonging to ino.
+// clearExtents assumes a lock is held.
+func (tx *FSTx) clearExtents(ctx context.Context, ino INode) error {
+	if tx.exttx.Queued() > 0 {
+		if _, err := tx.exttx.Flush(ctx); err != nil {
+			return err
+		}
+	}
+	it := tx.exttx.IterateFlushed(ctx, gotkv.PrefixSpan(ino[:]))
+	buf := make([]gotkv.Entry, 32)
+	for {
+		n, err := it.Next(ctx, buf)
+		if err != nil {
+			if streams.IsEOS(err) {
+				return nil
+			}
+			return err
+		}
+		for i := 0; i < n; i++ {
+			if err := tx.exttx.Delete(ctx, buf[i].Key); err != nil {
+				return err
+			}
+		}
+	}
 }
 
 // writeExtent assumes the write lock is held.
@@ -284,13 +296,13 @@ func (tx *FSTx) getOverlappingExtents(ctx context.Context, ino INode, start, end
 	if start >= end {
 		return nil, nil
 	}
-	if tx.inodetx.Queued() > 0 {
-		if _, err := tx.inodetx.Flush(ctx); err != nil {
+	if tx.exttx.Queued() > 0 {
+		if _, err := tx.exttx.Flush(ctx); err != nil {
 			return nil, err
 		}
 	}
 	begin := extKey(ino, start+1)
-	it := tx.inodetx.IterateFlushed(ctx, gotkv.Span{Begin: begin[:], End: gotkv.PrefixEnd(ino[:])})
+	it := tx.exttx.IterateFlushed(ctx, gotkv.Span{Begin: begin[:], End: gotkv.PrefixEnd(ino[:])})
 	buf := make([]gotkv.Entry, 32)
 	var ret []extentEntry
 	for {
@@ -371,8 +383,7 @@ func (tx *FSTx) WriteAt(ctx context.Context, ino INode, offset int64, buf []byte
 		}); err != nil {
 			return err
 		}
-		key := extKey(ino, ee.EndAt)
-		if err := tx.inodetx.Delete(ctx, key[:]); err != nil {
+		if err := tx.deleteExtent(ctx, ino, ee.EndAt); err != nil {
 			return err
 		}
 		if extStart < start {

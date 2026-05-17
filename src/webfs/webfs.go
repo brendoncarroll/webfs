@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
+	"slices"
 	"sync"
 
 	"blobcache.io/blobcache/src/bcsdk"
@@ -37,6 +38,8 @@ type VolumeConfig struct {
 	PrivateKeySeed blobcache.DEK      `json:"private"`
 	// SignAlgo is the signature algorithm to use for signing.
 	SignAlgo string `json:"sign_algo"`
+	// Authors is a list of keys which are allowed to author new filesystems
+	Authors []inet256.ID `json:"authors"`
 }
 
 func (vc VolumeConfig) DeriveSiging() (sign.PublicKey, sign.PrivateKey) {
@@ -91,7 +94,7 @@ func (sys *System) GenerateConfig(fqoid blobcache.FQOID) VolumeConfig {
 	rand.Read(gid[:])
 
 	const hashAlgo = blobcache.HashAlgo_BLAKE3_256
-	return VolumeConfig{
+	vcfg := VolumeConfig{
 		VolumeID:       fqoid.OID,
 		NodeID:         fqoid.Node,
 		HashAlgo:       hashAlgo,
@@ -100,6 +103,10 @@ func (sys *System) GenerateConfig(fqoid blobcache.FQOID) VolumeConfig {
 		PrivateKeySeed: private,
 		SignAlgo:       MLDSA87,
 	}
+	pub, _ := vcfg.DeriveSiging()
+	id := sys.pki.NewID(pub)
+	vcfg.Authors = []inet256.ID{id}
+	return vcfg
 }
 
 // Initialize initializes a new webfs filesystem in a volume using config.
@@ -344,9 +351,13 @@ func (sys *System) beginTx(ctx context.Context, vcfg VolumeConfig, bctx *bcsdk.T
 	}
 	fqoid := blobcache.FQOID{OID: vcfg.VolumeID, Node: vcfg.NodeID}
 	pkcache := sys.getPKCache(fqoid, vcfg.HashAlgo)
-	fsstate, err := openFS(ctx, pkcache, vcfg, bctx, ctext)
+	fsstate, authorPub, err := openFS(ctx, pkcache, vcfg, bctx, ctext)
 	if err != nil {
 		return nil, err
+	}
+	authorID := sys.pki.NewID(authorPub)
+	if !slices.Contains(vcfg.Authors, authorID) {
+		return nil, &ErrNotAllowed{Actor: authorID, Op: "author_fs"}
 	}
 	fstx := sys.newFSTx(vcfg, fsstate, bctx, bctx)
 	return &Tx{
@@ -406,14 +417,14 @@ func (sys *System) sealFS(ctx context.Context, vcfg VolumeConfig, s bcsdk.WO, x 
 	return ctext, nil
 }
 
-func openFS(ctx context.Context, pkcache *PublicKeyCache, vcfg VolumeConfig, s bcsdk.RO, in []byte) (FSState, error) {
+func openFS(ctx context.Context, pkcache *PublicKeyCache, vcfg VolumeConfig, s bcsdk.RO, in []byte) (FSState, inet256.PublicKey, error) {
 	aead, err := chacha20poly1305.NewX(vcfg.DEK[:])
 	if err != nil {
-		return FSState{}, err
+		return FSState{}, nil, err
 	}
 	// get nonce from front
 	if len(in) < chacha20poly1305.NonceSizeX {
-		return FSState{}, fmt.Errorf("too short to contain nonce")
+		return FSState{}, nil, fmt.Errorf("too short to contain nonce")
 	}
 	var nonce [chacha20poly1305.NonceSizeX]byte
 	copy(nonce[:], in[:])
@@ -422,17 +433,17 @@ func openFS(ctx context.Context, pkcache *PublicKeyCache, vcfg VolumeConfig, s b
 	var ptext []byte
 	ptext, err = aead.Open(ptext, nonce[:], ctext, nil)
 	if err != nil {
-		return FSState{}, err
+		return FSState{}, nil, err
 	}
-	fsdata, _, err := openSigned(ctx, pkcache, &fsSigCtx, s, ptext)
+	fsdata, authorPub, err := openSigned(ctx, pkcache, &fsSigCtx, s, ptext)
 	if err != nil {
-		return FSState{}, err
+		return FSState{}, nil, err
 	}
 	var ret FSState
 	if err := ret.Unmarshal(fsdata); err != nil {
-		return FSState{}, err
+		return FSState{}, nil, err
 	}
-	return ret, nil
+	return ret, authorPub, nil
 }
 
 type PublicKeyCache = gdatcache.Cache[inet256.PublicKey]

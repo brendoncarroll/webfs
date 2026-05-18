@@ -177,7 +177,7 @@ func (sys *System) View(ctx context.Context, vcfg VolumeConfig) (*Tx, error) {
 	if err != nil {
 		return nil, err
 	}
-	return sys.beginTx(ctx, vcfg, txn)
+	return sys.beginTx(ctx, vcfg, txn, false)
 }
 
 func (sys *System) Modify(ctx context.Context, vcfg VolumeConfig) (*Tx, error) {
@@ -189,7 +189,7 @@ func (sys *System) Modify(ctx context.Context, vcfg VolumeConfig) (*Tx, error) {
 	if err != nil {
 		return nil, err
 	}
-	return sys.beginTx(ctx, vcfg, txn)
+	return sys.beginTx(ctx, vcfg, txn, true)
 }
 
 // FSParams contains filesystem level parameters.
@@ -371,12 +371,13 @@ func newMachines(fp FSParams) *machines {
 type Tx struct {
 	bctx *bcsdk.Tx
 	// sem serializes calls to Abort and Commit
-	sem semaphore.Weighted
+	sem     semaphore.Weighted
+	isWrite bool
 
 	FSTx
 }
 
-func (sys *System) beginTx(ctx context.Context, vcfg VolumeConfig, bctx *bcsdk.Tx) (*Tx, error) {
+func (sys *System) beginTx(ctx context.Context, vcfg VolumeConfig, bctx *bcsdk.Tx, isWrite bool) (*Tx, error) {
 	var ctext []byte
 	if err := bctx.Load(ctx, &ctext); err != nil {
 		return nil, err
@@ -393,9 +394,10 @@ func (sys *System) beginTx(ctx context.Context, vcfg VolumeConfig, bctx *bcsdk.T
 	}
 	fstx := sys.newFSTx(vcfg, fsstate, bctx, bctx)
 	return &Tx{
-		bctx: bctx,
-		FSTx: *fstx,
-		sem:  *semaphore.NewWeighted(1),
+		bctx:    bctx,
+		FSTx:    *fstx,
+		isWrite: isWrite,
+		sem:     *semaphore.NewWeighted(1),
 	}, nil
 }
 
@@ -428,6 +430,10 @@ func (tx *Tx) Commit(ctx context.Context) error {
 		return err
 	}
 	return tx.bctx.Commit(ctx)
+}
+
+func (tx *Tx) IsWrite() bool {
+	return tx.isWrite
 }
 
 var fsSigCtx = inet256.SigCtxString("webfs/fs")

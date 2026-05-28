@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	blobcache.io/blobcache v0.7.1-0.20260515040525-c568b849bf89
 	capnproto.org/go/capnp/v3 v3.1.0-alpha.2
-	github.com/cloudflare/circl v1.6.1
+	github.com/cloudflare/circl v1.6.3
 	github.com/gotvc/got v0.4.1-0.20260514135151-658fded0a865
 	github.com/hanwen/go-fuse/v2 v2.8.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7

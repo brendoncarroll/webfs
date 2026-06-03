@@ -14,6 +14,7 @@ require (
 	go.brendoncarroll.net/star v0.0.0-20260504181633-9736e9cb9450
 	go.brendoncarroll.net/tai64 v0.0.0-20241118171318-6e12d283d5e4
 	go.inet256.org/inet256 v0.0.9-0.20260515191758-f465b29c8f1f
+	golang.org/x/crypto v0.46.1-0.20251210140736-7dacc380ba00
 	golang.org/x/sync v0.19.0
 	golang.org/x/sys v0.42.0
 )
@@ -58,7 +59,7 @@ require (
 	github.com/prometheus/client_model v0.5.0 // indirect
 	github.com/prometheus/common v0.48.0 // indirect
 	github.com/prometheus/procfs v0.12.0 // indirect
-	github.com/quic-go/quic-go v0.57.1 // indirect
+	github.com/quic-go/quic-go v0.59.1 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
@@ -67,7 +68,6 @@ require (
 	go.brendoncarroll.net/stdctx v0.0.0-20241118190518-40d09f4d11e7 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
-	golang.org/x/crypto v0.46.1-0.20251210140736-7dacc380ba00 // indirect
 	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b // indirect
 	golang.org/x/net v0.47.0 // indirect
 	golang.org/x/text v0.32.0 // indirect
